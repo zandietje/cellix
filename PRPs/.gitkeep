@@ -1,0 +1,18 @@
+# PRPs Directory
+
+This directory contains Project Requirement Plans (PRPs) for feature implementation.
+
+## Naming Convention
+`{feature-name}.md` - e.g., `excel-read-helpers.md`, `chat-ui.md`
+
+## Creating a PRP
+Use the `/generate-prp` command:
+```
+/generate-prp excel-read-helpers
+```
+
+## Executing a PRP
+Use the `/execute-prp` command:
+```
+/execute-prp PRPs/excel-read-helpers.md
+```
