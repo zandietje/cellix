@@ -14,7 +14,7 @@ const render = () => {
   const root = createRoot(container);
   root.render(
     <React.StrictMode>
-      <FluentProvider theme={webLightTheme}>
+      <FluentProvider theme={webLightTheme} style={{ height: '100%' }}>
         <ErrorBoundary>
           <App isOfficeInitialized={isOfficeInitialized} />
         </ErrorBoundary>

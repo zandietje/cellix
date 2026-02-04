@@ -21,7 +21,7 @@ export interface AddinConfig {
 }
 
 export const DEFAULT_CONFIG: AddinConfig = {
-  apiUrl: import.meta.env.VITE_API_URL || 'https://localhost:3001/api',
+  apiUrl: import.meta.env.VITE_API_URL || '/api',
   maxMessageLength: 4000,
   enableDevTools: import.meta.env.DEV,
 };

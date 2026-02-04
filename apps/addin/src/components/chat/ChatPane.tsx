@@ -11,14 +11,26 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
+    minHeight: 0,
+    position: 'relative',
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  messages: {
+  messagesWrapper: {
     flex: 1,
-    overflow: 'auto',
+    minHeight: 0,
+    position: 'relative',
+  },
+  messages: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    overflowY: 'auto',
     padding: tokens.spacingVerticalM,
   },
   input: {
+    flexShrink: 0,
     borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
     padding: tokens.spacingVerticalS,
   },
@@ -117,9 +129,11 @@ export function ChatPane() {
 
   return (
     <div className={styles.container}>
-      <div className={styles.messages}>
-        <MessageList messages={messages} />
-        {isTyping && <TypingIndicator />}
+      <div className={styles.messagesWrapper}>
+        <div className={styles.messages}>
+          <MessageList messages={messages} />
+          {isTyping && <TypingIndicator />}
+        </div>
       </div>
       <div className={styles.input}>
         <InputBox onSend={handleSend} disabled={isTyping} />

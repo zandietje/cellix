@@ -14,12 +14,14 @@ const useStyles = makeStyles({
   },
   content: {
     flex: 1,
+    minHeight: 0, // Required for flex children to shrink and enable scrolling
     overflow: 'hidden',
     display: 'flex',
     flexDirection: 'column',
   },
   chatArea: {
     flex: 1,
+    minHeight: 0, // Required for flex children to shrink and enable scrolling
     overflow: 'hidden',
   },
   notInitialized: {
