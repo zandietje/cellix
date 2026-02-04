@@ -1,5 +1,6 @@
 import { makeStyles, Text, tokens, mergeClasses } from '@fluentui/react-components';
 import type { ChatMessage } from '@cellix/shared';
+import { ToolCallCard } from './ToolCallCard';
 
 const useStyles = makeStyles({
   container: {
@@ -35,6 +36,9 @@ const useStyles = makeStyles({
     marginTop: tokens.spacingVerticalXS,
     opacity: 0.7,
   },
+  toolCalls: {
+    marginTop: tokens.spacingVerticalS,
+  },
 });
 
 interface MessageBubbleProps {
@@ -62,10 +66,21 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     });
   };
 
+  const hasToolCalls = message.toolCalls && message.toolCalls.length > 0;
+
   return (
     <div className={containerClass}>
       <div className={bubbleClass}>
-        <Text className={styles.content}>{message.content}</Text>
+        {message.content && <Text className={styles.content}>{message.content}</Text>}
+
+        {hasToolCalls && (
+          <div className={styles.toolCalls}>
+            {message.toolCalls!.map((toolCall) => (
+              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+            ))}
+          </div>
+        )}
+
         <Text className={styles.timestamp}>{formatTime(message.timestamp)}</Text>
       </div>
     </div>

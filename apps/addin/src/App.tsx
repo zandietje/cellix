@@ -2,8 +2,10 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 import { TabNavigation } from './components/common/TabNavigation';
 import { ChatPane } from './components/chat/ChatPane';
 import { ControlPanel } from './components/controls/ControlPanel';
+import { PreviewPanel } from './components/preview/PreviewPanel';
 import { Loading } from './components/common/Loading';
 import { useUIStore } from './store/uiStore';
+import { usePreviewStore } from './store/previewStore';
 
 const useStyles = makeStyles({
   container: {
@@ -19,9 +21,28 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
   },
+  mainArea: {
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'row',
+    overflow: 'hidden',
+  },
+  chatSection: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
   chatArea: {
     flex: 1,
     minHeight: 0, // Required for flex children to shrink and enable scrolling
+    overflow: 'hidden',
+  },
+  previewSection: {
+    width: '280px',
+    flexShrink: 0,
     overflow: 'hidden',
   },
   notInitialized: {
@@ -43,6 +64,7 @@ interface AppProps {
 export default function App({ isOfficeInitialized }: AppProps) {
   const styles = useStyles();
   const { activeTab } = useUIStore();
+  const { isPanelVisible } = usePreviewStore();
 
   if (!isOfficeInitialized) {
     return (
@@ -59,8 +81,17 @@ export default function App({ isOfficeInitialized }: AppProps) {
         {activeTab === 'chat' && (
           <>
             <ControlPanel />
-            <div className={styles.chatArea}>
-              <ChatPane />
+            <div className={styles.mainArea}>
+              <div className={styles.chatSection}>
+                <div className={styles.chatArea}>
+                  <ChatPane />
+                </div>
+              </div>
+              {isPanelVisible && (
+                <div className={styles.previewSection}>
+                  <PreviewPanel />
+                </div>
+              )}
             </div>
           </>
         )}

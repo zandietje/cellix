@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ChatMessage, ToolCall } from '@cellix/shared';
+import type { ChatMessage, ToolCall, ToolCallStatus } from '@cellix/shared';
 
 interface ChatState {
   /** All messages in the current conversation */
@@ -22,6 +22,8 @@ interface ChatState {
   clearMessages: () => void;
   /** Set the current session ID */
   setSessionId: (sessionId: string) => void;
+  /** Update a tool call's status */
+  updateToolCallStatus: (toolCallId: string, status: ToolCallStatus) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -82,4 +84,21 @@ export const useChatStore = create<ChatState>((set) => ({
     }),
 
   setSessionId: (sessionId) => set({ sessionId }),
+
+  updateToolCallStatus: (toolCallId, status) =>
+    set((state) => {
+      const messages = state.messages.map((message) => {
+        if (message.role !== 'assistant' || !message.toolCalls) {
+          return message;
+        }
+
+        const updatedToolCalls = message.toolCalls.map((tc) =>
+          tc.id === toolCallId ? { ...tc, status } : tc
+        );
+
+        return { ...message, toolCalls: updatedToolCalls };
+      });
+
+      return { messages };
+    }),
 }));

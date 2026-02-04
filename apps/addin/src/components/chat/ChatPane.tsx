@@ -6,7 +6,10 @@ import { InputBox } from './InputBox';
 import { TypingIndicator } from './TypingIndicator';
 import { useChatStore } from '@/store/chatStore';
 import { useExcelStore } from '@/store/excelStore';
+import { usePreviewStore } from '@/store/previewStore';
 import { streamChat } from '@/lib/api';
+import { generatePreview, isWriteTool } from '@/lib/tools';
+import type { ToolCall } from '@cellix/shared';
 
 const useStyles = makeStyles({
   container: {
@@ -45,10 +48,45 @@ export function ChatPane() {
   const styles = useStyles();
   const { messages, isTyping, addMessage, updateLastAssistantMessage, setTyping } = useChatStore();
   const { context: excelContext } = useExcelStore();
+  const { addPendingAction } = usePreviewStore();
 
   // Error state for connection/streaming errors
   const [streamError, setStreamError] = useState<string | null>(null);
   const lastMessageRef = useRef<string | null>(null);
+
+  // Process tool calls and generate previews
+  const processToolCalls = useCallback(
+    async (toolCalls: Array<{ id: string; name: string; arguments: string }>) => {
+      for (const tc of toolCalls) {
+        // Only process write tools
+        if (!isWriteTool(tc.name)) continue;
+
+        try {
+          // Parse parameters
+          let parameters: Record<string, unknown> = {};
+          try {
+            parameters = JSON.parse(tc.arguments || '{}');
+          } catch {
+            // Keep empty object if parse fails
+          }
+
+          const toolCall: ToolCall = {
+            id: tc.id,
+            name: tc.name,
+            parameters,
+            status: 'pending',
+          };
+
+          // Generate preview and add to store
+          const preview = await generatePreview(toolCall);
+          addPendingAction(preview);
+        } catch (err) {
+          console.error(`[ChatPane] Failed to generate preview for ${tc.name}:`, err);
+        }
+      }
+    },
+    [addPendingAction]
+  );
 
   const processStream = useCallback(
     async (content: string) => {
@@ -112,11 +150,15 @@ export function ChatPane() {
             break;
 
           case 'done':
+            // Process any pending tool calls when stream completes
+            if (toolCalls.length > 0) {
+              await processToolCalls(toolCalls);
+            }
             break;
         }
       }
     },
-    [excelContext, updateLastAssistantMessage]
+    [excelContext, updateLastAssistantMessage, processToolCalls]
   );
 
   const handleSend = useCallback(
