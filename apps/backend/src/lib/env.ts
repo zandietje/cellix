@@ -10,9 +10,12 @@ const envSchema = z.object({
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
     .default('info'),
-  // Phase 3+ - AI integration
-  // OPENAI_API_KEY: z.string().optional(),
-  // Phase 3+ - Database
+  // AI Provider - Required for Phase 3+
+  // Supports OpenAI direct or OpenRouter (set OPENAI_BASE_URL for OpenRouter)
+  OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required'),
+  OPENAI_BASE_URL: z.string().optional(), // e.g., https://openrouter.ai/api/v1
+  OPENAI_MODEL: z.string().default('gpt-4o'),
+  // Phase 4+ - Database
   // SUPABASE_URL: z.string().optional(),
   // SUPABASE_ANON_KEY: z.string().optional(),
 });

@@ -62,14 +62,27 @@ export interface ExcelContext {
   headers?: string[];
 }
 
-/** Streaming chat response chunk */
-export interface ChatStreamChunk {
-  /** Type of chunk */
-  type: 'text' | 'tool_call' | 'done' | 'error';
-  /** Text content (for type: 'text') */
+/** Tool call data from streaming */
+export interface ToolCallChunk {
+  /** Unique tool call ID */
+  id: string;
+  /** Name of the tool being called */
+  name: string;
+  /** JSON string of arguments (accumulated across chunks) */
+  arguments: string;
+}
+
+/** Streaming chat response event (matches backend ChatStreamEvent) */
+export interface ChatStreamEvent {
+  /** Type of event */
+  type: 'text' | 'tool_call_start' | 'tool_call_delta' | 'tool_call_end' | 'done' | 'error';
+  /** Text content (for text events) */
   content?: string;
-  /** Tool call data (for type: 'tool_call') */
-  toolCall?: ToolCall;
-  /** Error message (for type: 'error') */
+  /** Tool call data (for tool_call events) */
+  toolCall?: ToolCallChunk;
+  /** Error message (for error events) */
   error?: string;
 }
+
+/** @deprecated Use ChatStreamEvent instead */
+export type ChatStreamChunk = ChatStreamEvent;

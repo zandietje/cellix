@@ -3,6 +3,8 @@ import { MessageList } from './MessageList';
 import { InputBox } from './InputBox';
 import { TypingIndicator } from './TypingIndicator';
 import { useChatStore } from '@/store/chatStore';
+import { useExcelStore } from '@/store/excelStore';
+import { streamChat } from '@/lib/api';
 
 const useStyles = makeStyles({
   container: {
@@ -24,21 +26,93 @@ const useStyles = makeStyles({
 
 export function ChatPane() {
   const styles = useStyles();
-  const { messages, isTyping, addMessage, setTyping } = useChatStore();
+  const { messages, isTyping, addMessage, updateLastAssistantMessage, setTyping } = useChatStore();
+  const { context: excelContext } = useExcelStore();
 
   const handleSend = async (content: string) => {
+    // Add user message
     addMessage({ role: 'user', content });
 
-    // TODO: Phase 3 - Send to backend and get AI response
-    // For now, just echo back
+    // Create placeholder for assistant response
+    addMessage({ role: 'assistant', content: '' });
     setTyping(true);
-    setTimeout(() => {
-      addMessage({
-        role: 'assistant',
-        content: `I received your message: "${content}". AI integration coming in Phase 3!`,
-      });
+
+    try {
+      let fullContent = '';
+      const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
+
+      // Stream the response from the backend
+      for await (const event of streamChat(content, excelContext)) {
+        switch (event.type) {
+          case 'text':
+            // Accumulate text content
+            if (event.content) {
+              fullContent += event.content;
+              updateLastAssistantMessage(fullContent, toolCalls);
+            }
+            break;
+
+          case 'tool_call_start':
+          case 'tool_call_delta':
+            // Tool call is being built - update accumulator
+            if (event.toolCall) {
+              const existingIndex = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
+              if (existingIndex >= 0) {
+                toolCalls[existingIndex] = {
+                  id: event.toolCall.id,
+                  name: event.toolCall.name,
+                  arguments: event.toolCall.arguments,
+                };
+              } else if (event.toolCall.id) {
+                toolCalls.push({
+                  id: event.toolCall.id,
+                  name: event.toolCall.name,
+                  arguments: event.toolCall.arguments,
+                });
+              }
+              updateLastAssistantMessage(fullContent, toolCalls);
+            }
+            break;
+
+          case 'tool_call_end':
+            // Tool call is complete - update with final data
+            if (event.toolCall) {
+              const existingIndex = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
+              if (existingIndex >= 0) {
+                toolCalls[existingIndex] = {
+                  id: event.toolCall.id,
+                  name: event.toolCall.name,
+                  arguments: event.toolCall.arguments,
+                };
+              } else {
+                toolCalls.push({
+                  id: event.toolCall.id,
+                  name: event.toolCall.name,
+                  arguments: event.toolCall.arguments,
+                });
+              }
+              updateLastAssistantMessage(fullContent, toolCalls);
+            }
+            break;
+
+          case 'error':
+            // Display error in the message
+            fullContent += `\n\n*Error: ${event.error}*`;
+            updateLastAssistantMessage(fullContent, toolCalls);
+            break;
+
+          case 'done':
+            // Stream complete
+            break;
+        }
+      }
+    } catch (error) {
+      // Handle fetch/network errors
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
+      updateLastAssistantMessage(`*Error: ${errorMessage}*`, []);
+    } finally {
       setTyping(false);
-    }, 1000);
+    }
   };
 
   return (

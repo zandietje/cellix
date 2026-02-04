@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ChatMessage } from '@cellix/shared';
+import type { ChatMessage, ToolCall } from '@cellix/shared';
 
 interface ChatState {
   /** All messages in the current conversation */
@@ -11,6 +11,11 @@ interface ChatState {
 
   /** Add a new message to the conversation */
   addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void;
+  /** Update the last assistant message (for streaming) */
+  updateLastAssistantMessage: (
+    content: string,
+    toolCalls?: Array<{ id: string; name: string; arguments: string }>
+  ) => void;
   /** Set the typing indicator state */
   setTyping: (isTyping: boolean) => void;
   /** Clear all messages and start a new session */
@@ -35,6 +40,38 @@ export const useChatStore = create<ChatState>((set) => ({
         },
       ],
     })),
+
+  updateLastAssistantMessage: (content, toolCalls) =>
+    set((state) => {
+      const messages = [...state.messages];
+      const lastIndex = messages.length - 1;
+
+      if (lastIndex >= 0 && messages[lastIndex].role === 'assistant') {
+        // Parse tool calls from JSON strings to ToolCall objects
+        const parsedToolCalls: ToolCall[] | undefined = toolCalls?.map((tc) => {
+          let parameters: Record<string, unknown> = {};
+          try {
+            parameters = JSON.parse(tc.arguments || '{}');
+          } catch {
+            // Keep empty object if parse fails
+          }
+          return {
+            id: tc.id,
+            name: tc.name,
+            parameters,
+            status: 'pending' as const,
+          };
+        });
+
+        messages[lastIndex] = {
+          ...messages[lastIndex],
+          content,
+          toolCalls: parsedToolCalls,
+        };
+      }
+
+      return { messages };
+    }),
 
   setTyping: (isTyping) => set({ isTyping }),
 

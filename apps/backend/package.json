@@ -15,7 +15,10 @@
     "@cellix/shared": "workspace:*",
     "@fastify/cors": "^9.0.1",
     "fastify": "^4.25.2",
-    "zod": "^3.22.4"
+    "gpt-tokenizer": "^3.4.0",
+    "openai": "^6.17.0",
+    "zod": "^3.22.4",
+    "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.5",

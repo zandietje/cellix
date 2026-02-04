@@ -1,5 +1,6 @@
 import { buildServer } from './server.js';
 import { healthRoutes } from './routes/health.js';
+import { chatRoutes } from './routes/chat.js';
 import { env } from './lib/env.js';
 
 async function main() {
@@ -7,6 +8,7 @@ async function main() {
 
   // Register routes
   await server.register(healthRoutes, { prefix: '/api' });
+  await server.register(chatRoutes, { prefix: '/api' });
 
   // Start server
   try {
