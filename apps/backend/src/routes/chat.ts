@@ -1,10 +1,21 @@
 /**
  * Chat API routes with Server-Sent Events streaming.
+ *
+ * Uses a two-stage AI architecture:
+ * 1. Planner: Fast intent detection and tool selection (gpt-4o-mini)
+ * 2. Executor: Forced tool execution or question answering (gpt-4o)
  */
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { getAIProvider, SYSTEM_PROMPT, formatExcelContext } from '../services/ai/index.js';
+import {
+  getAIProvider,
+  SYSTEM_PROMPT,
+  formatExcelContext,
+  planToolCall,
+  isValidToolPlan,
+} from '../services/ai/index.js';
+import type { ToolChoice } from '../services/ai/types.js';
 import { TOOL_DEFINITIONS } from '../services/tools/index.js';
 import { TOKEN_LIMITS, countTokens, truncateToTokenLimit } from '../lib/tokens.js';
 import type { ExcelContextFull } from '@cellix/shared';
@@ -61,14 +72,6 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         { role: 'user' as const, content: message },
       ];
 
-      // Log request (without full context for brevity)
-      fastify.log.info({
-        msg: 'Chat request',
-        messageLength: message.length,
-        hasExcelContext: !!excelContext,
-        systemTokens,
-      });
-
       // Set SSE headers - use raw response for streaming
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -78,11 +81,75 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         'Access-Control-Allow-Origin': '*', // CORS for SSE
       });
 
-      // Stream AI response
+      // ═══════════════════════════════════════════════════════════
+      // STAGE 1: PLANNER - Detect intent and select tool
+      // ═══════════════════════════════════════════════════════════
+      const typedContext = excelContext as ExcelContextFull | undefined;
+      const excelContextForPlanner = typedContext
+        ? {
+            selection: typedContext.selection?.address,
+            rows: typedContext.selection?.rowCount,
+            cols: typedContext.selection?.columnCount,
+            sheet: typedContext.activeSheet,
+            hasData: (typedContext.selection?.values?.length ?? 0) > 0,
+          }
+        : undefined;
+
+      let plan;
+      try {
+        plan = await planToolCall(message, excelContextForPlanner);
+        fastify.log.info({
+          msg: 'Planner result',
+          intent: plan.intent,
+          tool: plan.tool,
+          confidence: plan.confidence,
+          reasoning: plan.reasoning,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Planner failed';
+        fastify.log.error({ msg: 'Planner failed', error: errorMessage });
+        // Fall back to auto mode
+        plan = { intent: 'question' as const, confidence: 0.5, reasoning: 'Planner error' };
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // Handle clarify intent - ask user for more info
+      // ═══════════════════════════════════════════════════════════
+      if (plan.intent === 'clarify') {
+        const clarifyText = plan.clarifyQuestion || 'Could you please clarify what you would like me to do?';
+        reply.raw.write(`data: ${JSON.stringify({ type: 'text', content: clarifyText })}\n\n`);
+        reply.raw.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        reply.raw.end();
+        return;
+      }
+
+      // ═══════════════════════════════════════════════════════════
+      // STAGE 2: EXECUTOR - Execute based on plan
+      // ═══════════════════════════════════════════════════════════
       const provider = getAIProvider();
 
+      // Determine tool choice based on plan
+      let toolChoice: ToolChoice | undefined;
+      let tools = TOOL_DEFINITIONS;
+
+      if (plan.intent === 'action' && plan.tool && isValidToolPlan(plan.tool)) {
+        // FORCE the specific tool - this is the key fix!
+        toolChoice = { type: 'function', function: { name: plan.tool } };
+        fastify.log.info({ msg: 'Forcing tool call', tool: plan.tool });
+      } else if (plan.intent === 'question') {
+        // No tools for questions - pure conversation
+        toolChoice = 'none';
+        tools = [];
+        fastify.log.info({ msg: 'Question mode - no tools' });
+      }
+
       try {
-        for await (const event of provider.chat({ messages, tools: TOOL_DEFINITIONS })) {
+        for await (const event of provider.chat({
+          messages,
+          tools,
+          toolChoice,
+          temperature: plan.intent === 'action' ? 0.2 : 0.7, // Low temp for actions
+        })) {
           // Send each event as SSE
           const data = JSON.stringify(event);
           reply.raw.write(`data: ${data}\n\n`);
@@ -90,7 +157,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           // Log tool calls for debugging
           if (event.type === 'tool_call_end' && event.toolCall) {
             fastify.log.info({
-              msg: 'Tool call',
+              msg: 'Tool call executed',
               toolName: event.toolCall.name,
               toolId: event.toolCall.id,
             });

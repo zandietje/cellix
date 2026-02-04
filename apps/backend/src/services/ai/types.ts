@@ -18,6 +18,13 @@ export interface ToolDefinition {
   };
 }
 
+/** Tool choice option - controls how the AI uses tools */
+export type ToolChoice =
+  | 'auto' // AI decides whether to use tools
+  | 'none' // AI cannot use tools
+  | 'required' // AI must use a tool
+  | { type: 'function'; function: { name: string } }; // Force specific tool
+
 /** Parameters for chat completion */
 export interface ChatParams {
   /** Conversation messages */
@@ -28,6 +35,8 @@ export interface ChatParams {
   maxTokens?: number;
   /** Temperature for response randomness (0-2) */
   temperature?: number;
+  /** Control tool usage behavior */
+  toolChoice?: ToolChoice;
 }
 
 /** Tool call data accumulated from stream */

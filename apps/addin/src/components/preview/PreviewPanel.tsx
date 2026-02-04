@@ -37,7 +37,7 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
   },
   header: {
-    padding: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalS,
     backgroundColor: tokens.colorNeutralBackground2,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
   },
@@ -50,17 +50,19 @@ const useStyles = makeStyles({
   },
   content: {
     flex: 1,
+    minHeight: 0, // Required for flex children to shrink and enable scrolling
     overflowY: 'auto',
-    padding: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalS,
   },
   footer: {
-    padding: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalS,
     borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
     backgroundColor: tokens.colorNeutralBackground2,
   },
   footerActions: {
     display: 'flex',
-    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalXS,
     justifyContent: 'flex-end',
   },
   emptyState: {
@@ -124,8 +126,9 @@ export function PreviewPanel() {
   const handleApprove = useCallback(
     (toolCallId: string) => {
       approveAction(toolCallId);
+      updateToolCallStatus(toolCallId, 'preview'); // Sync status to chatStore
     },
-    [approveAction]
+    [approveAction, updateToolCallStatus]
   );
 
   const handleReject = useCallback(
@@ -147,6 +150,15 @@ export function PreviewPanel() {
     }
     rejectAll();
   }, [pendingActions, rejectAll, updateToolCallStatus]);
+
+  const handleApproveAll = useCallback(() => {
+    for (const preview of pendingActions) {
+      if (preview.validation.valid) {
+        updateToolCallStatus(preview.toolCall.id, 'preview'); // Sync status to chatStore
+      }
+    }
+    approveAll();
+  }, [pendingActions, approveAll, updateToolCallStatus]);
 
   const handleExecute = useCallback(async () => {
     // Check if any require confirmation
@@ -255,6 +267,7 @@ export function PreviewPanel() {
         <div className={styles.footerActions}>
           <Button
             appearance="subtle"
+            size="small"
             icon={<DismissCircle24Regular />}
             onClick={handleRejectAll}
             disabled={isExecuting}
@@ -265,8 +278,9 @@ export function PreviewPanel() {
           {approvedActions.length === 0 && validActions.length > 0 && (
             <Button
               appearance="subtle"
+              size="small"
               icon={<CheckmarkCircle24Regular />}
-              onClick={approveAll}
+              onClick={handleApproveAll}
               disabled={isExecuting}
             >
               Approve All
@@ -275,11 +289,12 @@ export function PreviewPanel() {
 
           <Button
             appearance="primary"
+            size="small"
             icon={<Play24Regular />}
             onClick={handleExecute}
             disabled={isExecuting || validActions.length === 0}
           >
-            Execute{approvedActions.length > 0 ? ` (${approvedActions.length})` : ' All'}
+            Execute{approvedActions.length > 0 ? ` (${approvedActions.length})` : ''}
           </Button>
         </div>
       </div>

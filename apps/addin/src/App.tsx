@@ -41,7 +41,8 @@ const useStyles = makeStyles({
     overflow: 'hidden',
   },
   previewSection: {
-    width: '280px',
+    width: '300px',
+    minWidth: '250px',
     flexShrink: 0,
     overflow: 'hidden',
   },

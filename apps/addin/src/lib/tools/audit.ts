@@ -14,19 +14,27 @@ const STORAGE_KEY = 'cellix_audit_log';
 /** In-memory audit log (also persisted to localStorage) */
 let auditLog: AuditLogEntry[] = [];
 
+/** Whether the audit log has been initialized from storage */
+let initialized = false;
+
 /**
  * Initialize audit log from localStorage if available.
  */
 function initializeFromStorage(): void {
+  if (initialized) return;
+
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       auditLog = JSON.parse(stored);
     }
-  } catch {
+  } catch (error) {
     // localStorage not available or corrupted, use empty log
+    console.warn('[Audit] Failed to load from storage:', error);
     auditLog = [];
   }
+
+  initialized = true;
 }
 
 /**
@@ -35,9 +43,9 @@ function initializeFromStorage(): void {
 function persistToStorage(): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(auditLog));
-  } catch {
+  } catch (error) {
     // localStorage not available or quota exceeded
-    // Continue without persistence
+    console.warn('[Audit] Failed to persist to storage:', error);
   }
 }
 
@@ -45,10 +53,8 @@ function persistToStorage(): void {
  * Logs a tool execution to the audit trail.
  */
 export function logToolExecution(entry: AuditLogEntry): void {
-  // Initialize if this is first call
-  if (auditLog.length === 0) {
-    initializeFromStorage();
-  }
+  // Initialize from storage on first call
+  initializeFromStorage();
 
   // Add new entry
   auditLog.push(entry);
@@ -62,7 +68,7 @@ export function logToolExecution(entry: AuditLogEntry): void {
   persistToStorage();
 
   // Log to console in development
-  if (process.env.NODE_ENV !== 'production') {
+  if (import.meta.env.DEV) {
     const status = entry.result === 'success' ? 'SUCCESS' : entry.result.toUpperCase();
     console.log(
       `[Audit] ${status}: ${entry.toolName} - ${entry.cellsAffected} cells in ${entry.executionTimeMs.toFixed(0)}ms`,
@@ -75,74 +81,6 @@ export function logToolExecution(entry: AuditLogEntry): void {
  * Gets the full audit log.
  */
 export function getAuditLog(): AuditLogEntry[] {
-  // Initialize if needed
-  if (auditLog.length === 0) {
-    initializeFromStorage();
-  }
+  initializeFromStorage();
   return [...auditLog];
-}
-
-/**
- * Gets recent audit entries (last N entries).
- */
-export function getRecentAuditEntries(count: number = 10): AuditLogEntry[] {
-  const log = getAuditLog();
-  return log.slice(-count);
-}
-
-/**
- * Gets audit entries for a specific tool.
- */
-export function getAuditEntriesForTool(toolName: string): AuditLogEntry[] {
-  return getAuditLog().filter((entry) => entry.toolName === toolName);
-}
-
-/**
- * Gets audit statistics.
- */
-export function getAuditStats(): {
-  totalExecutions: number;
-  successCount: number;
-  errorCount: number;
-  cancelledCount: number;
-  totalCellsAffected: number;
-  averageExecutionTimeMs: number;
-} {
-  const log = getAuditLog();
-
-  const stats = {
-    totalExecutions: log.length,
-    successCount: 0,
-    errorCount: 0,
-    cancelledCount: 0,
-    totalCellsAffected: 0,
-    averageExecutionTimeMs: 0,
-  };
-
-  let totalTime = 0;
-
-  for (const entry of log) {
-    if (entry.result === 'success') stats.successCount++;
-    if (entry.result === 'error') stats.errorCount++;
-    if (entry.result === 'cancelled') stats.cancelledCount++;
-    stats.totalCellsAffected += entry.cellsAffected;
-    totalTime += entry.executionTimeMs;
-  }
-
-  stats.averageExecutionTimeMs = log.length > 0 ? totalTime / log.length : 0;
-
-  return stats;
-}
-
-/**
- * Clears the audit log.
- * Use with caution - mainly for testing.
- */
-export function clearAuditLog(): void {
-  auditLog = [];
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Ignore storage errors
-  }
 }

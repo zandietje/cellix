@@ -46,7 +46,7 @@ const useStyles = makeStyles({
 
 export function ChatPane() {
   const styles = useStyles();
-  const { messages, isTyping, addMessage, updateLastAssistantMessage, setTyping } = useChatStore();
+  const { messages, isTyping, addMessage, updateLastAssistantMessage, setTyping, updateToolCallStatus } = useChatStore();
   const { context: excelContext } = useExcelStore();
   const { addPendingAction } = usePreviewStore();
 
@@ -80,12 +80,19 @@ export function ChatPane() {
           // Generate preview and add to store
           const preview = await generatePreview(toolCall);
           addPendingAction(preview);
+
+          // Update chat store status based on validation result
+          if (!preview.validation.valid) {
+            updateToolCallStatus(tc.id, 'error');
+          }
         } catch (err) {
           console.error(`[ChatPane] Failed to generate preview for ${tc.name}:`, err);
+          // Update status to error when preview generation fails
+          updateToolCallStatus(tc.id, 'error');
         }
       }
     },
-    [addPendingAction]
+    [addPendingAction, updateToolCallStatus]
   );
 
   const processStream = useCallback(
@@ -176,6 +183,8 @@ export function ChatPane() {
 
       try {
         await processStream(content);
+        // Clear the ref on success to free memory
+        lastMessageRef.current = null;
       } catch (error) {
         // Connection/network errors - show in error bar with retry option
         const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
@@ -199,6 +208,8 @@ export function ChatPane() {
 
     try {
       await processStream(lastMessageRef.current);
+      // Clear the ref on success to free memory
+      lastMessageRef.current = null;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
       setStreamError(errorMessage);

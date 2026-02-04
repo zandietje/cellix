@@ -3,25 +3,27 @@
  * Validates parameters before preview generation and execution.
  */
 
-import type { ToolCall } from '@cellix/shared';
 import {
-  isValidAddress,
-  isValidSheetName,
-  isFormulaAllowed,
-  validateCellCount,
-} from '../excel/validation';
+  READ_TOOLS,
+  ANALYTICS_TOOLS,
+  isWriteTool,
+} from '@cellix/shared';
+import type { ToolCall } from '@cellix/shared';
 import type {
-  ValidationResult,
-  ValidationError,
   WriteRangeParams,
   SetFormulaParams,
   FormatRangeParams,
   CreateSheetParams,
   AddTableParams,
   HighlightCellsParams,
-  WriteToolName,
-} from './types';
-import { WRITE_TOOLS } from './types';
+} from '@cellix/shared';
+import {
+  isValidAddress,
+  isValidSheetName,
+  isFormulaAllowed,
+  validateCellCount,
+} from '../excel/validation';
+import type { ValidationResult, ValidationError } from './types';
 
 /**
  * Validates a tool call and returns validation result.
@@ -30,13 +32,13 @@ export function validateToolCall(toolCall: ToolCall): ValidationResult {
   const errors: ValidationError[] = [];
 
   // Check if tool is in whitelist
-  if (!WRITE_TOOLS.includes(toolCall.name as WriteToolName)) {
-    // If not a write tool, it might be a read tool which doesn't need validation
+  if (!isWriteTool(toolCall.name)) {
+    // If not a write tool, it might be a read or analytics tool which doesn't need validation
     // But unknown tools should error
-    const READ_TOOLS = ['read_range', 'get_selection', 'get_sheet_names', 'get_context'];
-    const ANALYTICS_TOOLS = ['explain_kpi', 'compare_periods', 'suggest_actions', 'interpret_trend'];
+    const isReadTool = READ_TOOLS.includes(toolCall.name as (typeof READ_TOOLS)[number]);
+    const isAnalyticsTool = ANALYTICS_TOOLS.includes(toolCall.name as (typeof ANALYTICS_TOOLS)[number]);
 
-    if (!READ_TOOLS.includes(toolCall.name) && !ANALYTICS_TOOLS.includes(toolCall.name)) {
+    if (!isReadTool && !isAnalyticsTool) {
       errors.push({
         field: 'name',
         message: `Unknown tool: ${toolCall.name}`,

@@ -3,6 +3,7 @@
  * Enforces safety constraints per CLAUDE.md requirements.
  */
 
+import { columnToNumber } from '@cellix/shared';
 import { SAFETY_LIMITS } from '../constants';
 
 /**
@@ -102,18 +103,6 @@ export function calculateCellCount(address: string): number {
   const rows = Math.abs(endRow - startRow) + 1;
 
   return cols * rows;
-}
-
-/**
- * Converts column letter(s) to number (A=1, B=2, AA=27, etc.)
- */
-function columnToNumber(col: string): number {
-  let result = 0;
-  const upper = col.toUpperCase();
-  for (let i = 0; i < upper.length; i++) {
-    result = result * 26 + (upper.charCodeAt(i) - 64);
-  }
-  return result;
 }
 
 /**

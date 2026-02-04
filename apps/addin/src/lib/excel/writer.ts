@@ -1,15 +1,23 @@
 /**
  * Excel write helpers using Office.js API.
- * NOTE: In Phase 4, these will be wrapped with preview/confirmation system.
- * Current implementation includes validation but no preview UI.
+ * All write operations go through the preview system for user confirmation.
  */
 
 import { validateCellCount, isValidSheetName, isFormulaAllowed } from './validation';
 import type { FormatOptions, WriteResult } from '@cellix/shared';
 
 /**
+ * Sanitizes values for Excel write operations.
+ * Converts null/undefined to empty string since Office.js treats null as "no change".
+ */
+function sanitizeValues(values: unknown[][]): unknown[][] {
+  return values.map(row =>
+    row.map(cell => (cell === null || cell === undefined) ? '' : cell)
+  );
+}
+
+/**
  * Writes a 2D array of values to a range.
- * NOTE: In Phase 4, this will require preview and confirmation.
  */
 export async function writeRange(
   address: string,
@@ -21,11 +29,15 @@ export async function writeRange(
     return { success: false, cellCount: validation.cellCount, error: validation.error };
   }
 
+  // Sanitize values: convert null/undefined to empty string
+  // Office.js treats null as "keep existing value", but we want to clear the cell
+  const sanitizedValues = sanitizeValues(values);
+
   try {
     await Excel.run(async (context) => {
       const sheet = context.workbook.worksheets.getActiveWorksheet();
       const range = sheet.getRange(address);
-      range.values = values;
+      range.values = sanitizedValues;
       await context.sync();
     });
 
@@ -41,7 +53,6 @@ export async function writeRange(
 
 /**
  * Sets a formula in a single cell.
- * NOTE: In Phase 4, this will require preview and confirmation.
  */
 export async function setFormula(
   address: string,
@@ -72,52 +83,7 @@ export async function setFormula(
 }
 
 /**
- * Sets formulas in a range.
- * NOTE: In Phase 4, this will require preview and confirmation.
- */
-export async function setFormulas(
-  address: string,
-  formulas: string[][]
-): Promise<WriteResult> {
-  // Validate all formulas
-  for (const row of formulas) {
-    for (const formula of row) {
-      if (formula && formula.startsWith('=')) {
-        const check = isFormulaAllowed(formula);
-        if (!check.allowed) {
-          return { success: false, cellCount: 0, error: check.reason };
-        }
-      }
-    }
-  }
-
-  // Validate cell count
-  const validation = validateCellCount(address, formulas);
-  if (!validation.valid) {
-    return { success: false, cellCount: validation.cellCount, error: validation.error };
-  }
-
-  try {
-    await Excel.run(async (context) => {
-      const sheet = context.workbook.worksheets.getActiveWorksheet();
-      const range = sheet.getRange(address);
-      range.formulas = formulas;
-      await context.sync();
-    });
-
-    return { success: true, cellCount: validation.cellCount, address };
-  } catch (error) {
-    return {
-      success: false,
-      cellCount: validation.cellCount,
-      error: error instanceof Error ? error.message : 'Failed to set formulas',
-    };
-  }
-}
-
-/**
  * Applies formatting to a range.
- * NOTE: In Phase 4, this will require preview and confirmation.
  */
 export async function formatRange(
   address: string,
@@ -168,7 +134,6 @@ export async function formatRange(
 
 /**
  * Creates a new worksheet.
- * NOTE: In Phase 4, this will require confirmation.
  */
 export async function createSheet(
   name: string
@@ -202,7 +167,6 @@ export async function createSheet(
 
 /**
  * Creates an Excel table from a range.
- * NOTE: In Phase 4, this will require preview and confirmation.
  */
 export async function addTable(
   address: string,
@@ -239,40 +203,10 @@ export async function addTable(
 
 /**
  * Highlights cells with a background color.
- * NOTE: In Phase 4, this will require preview and confirmation.
  */
 export async function highlightCells(
   address: string,
   color: string
 ): Promise<WriteResult> {
   return formatRange(address, { fillColor: color });
-}
-
-/**
- * Clears contents of a range (not formatting).
- * NOTE: In Phase 4, this will require confirmation.
- */
-export async function clearRange(address: string): Promise<WriteResult> {
-  try {
-    let cellCount = 0;
-
-    await Excel.run(async (context) => {
-      const sheet = context.workbook.worksheets.getActiveWorksheet();
-      const range = sheet.getRange(address);
-      range.clear(Excel.ClearApplyTo.contents);
-
-      range.load(['rowCount', 'columnCount']);
-      await context.sync();
-
-      cellCount = range.rowCount * range.columnCount;
-    });
-
-    return { success: true, cellCount, address };
-  } catch (error) {
-    return {
-      success: false,
-      cellCount: 0,
-      error: error instanceof Error ? error.message : 'Failed to clear range',
-    };
-  }
 }

@@ -83,15 +83,19 @@ export const suggestActionsSchema = z.object({
 });
 
 // ============================================
-// Type exports
+// Type exports - re-export from shared for consistency
 // ============================================
 
-export type WriteRangeParams = z.infer<typeof writeRangeSchema>;
-export type SetFormulaParams = z.infer<typeof setFormulaSchema>;
-export type FormatRangeParams = z.infer<typeof formatRangeSchema>;
-export type CreateSheetParams = z.infer<typeof createSheetSchema>;
-export type AddTableParams = z.infer<typeof addTableSchema>;
-export type HighlightCellsParams = z.infer<typeof highlightCellsSchema>;
-export type ReadRangeParams = z.infer<typeof readRangeSchema>;
-export type ExplainKpiParams = z.infer<typeof explainKpiSchema>;
-export type SuggestActionsParams = z.infer<typeof suggestActionsSchema>;
+// The Zod schemas here validate incoming data, but the canonical
+// type definitions live in @cellix/shared for use across the codebase.
+export type {
+  WriteRangeParams,
+  SetFormulaParams,
+  FormatRangeParams,
+  CreateSheetParams,
+  AddTableParams,
+  HighlightCellsParams,
+  ReadRangeParams,
+  ExplainKpiParams,
+  SuggestActionsParams,
+} from '@cellix/shared';

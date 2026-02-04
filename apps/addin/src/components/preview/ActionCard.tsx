@@ -30,14 +30,16 @@ const useStyles = makeStyles({
   header: {
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
+    gap: tokens.spacingHorizontalXS,
+    flexWrap: 'wrap',
   },
   toolName: {
     fontWeight: tokens.fontWeightSemibold,
     textTransform: 'capitalize',
+    fontSize: tokens.fontSizeBase200,
   },
   content: {
-    padding: `0 ${tokens.spacingHorizontalM} ${tokens.spacingVerticalM}`,
+    padding: `0 ${tokens.spacingHorizontalS} ${tokens.spacingVerticalS}`,
   },
   detailRow: {
     display: 'flex',
@@ -71,8 +73,9 @@ const useStyles = makeStyles({
   },
   actions: {
     display: 'flex',
+    flexWrap: 'wrap',
     justifyContent: 'flex-end',
-    gap: tokens.spacingHorizontalS,
+    gap: tokens.spacingHorizontalXS,
     marginTop: tokens.spacingVerticalM,
   },
   errorCard: {
@@ -191,17 +194,19 @@ export function ActionCard({ preview, onApprove, onReject, disabled }: ActionCar
               <Tooltip content="View cell changes" relationship="label">
                 <Button
                   appearance="subtle"
+                  size="small"
                   icon={<Eye24Regular />}
                   onClick={() => setShowDiff(true)}
                   disabled={disabled}
                 >
-                  View Changes
+                  View
                 </Button>
               </Tooltip>
             )}
 
             <Button
               appearance="subtle"
+              size="small"
               icon={<DismissCircle24Regular />}
               onClick={() => onReject(toolCall.id)}
               disabled={disabled}
@@ -211,6 +216,7 @@ export function ActionCard({ preview, onApprove, onReject, disabled }: ActionCar
 
             <Button
               appearance="primary"
+              size="small"
               icon={<CheckmarkCircle24Regular />}
               onClick={() => onApprove(toolCall.id)}
               disabled={disabled || hasErrors}

@@ -4,6 +4,14 @@
  */
 
 import type { ToolCall } from '@cellix/shared';
+import type {
+  WriteRangeParams,
+  SetFormulaParams,
+  FormatRangeParams,
+  CreateSheetParams,
+  AddTableParams,
+  HighlightCellsParams,
+} from '@cellix/shared';
 import {
   writeRange,
   setFormula,
@@ -14,16 +22,7 @@ import {
 } from '../excel/writer';
 import { validateToolCall } from './validator';
 import { logToolExecution } from './audit';
-import type {
-  ExecutionResult,
-  PreviewData,
-  WriteRangeParams,
-  SetFormulaParams,
-  FormatRangeParams,
-  CreateSheetParams,
-  AddTableParams,
-  HighlightCellsParams,
-} from './types';
+import type { ExecutionResult, PreviewData } from './types';
 
 /**
  * Executes a single tool call.

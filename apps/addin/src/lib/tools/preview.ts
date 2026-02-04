@@ -3,21 +3,20 @@
  * Builds preview data by reading current cell values and computing changes.
  */
 
+import { columnToNumber, numberToColumn, isWriteTool } from '@cellix/shared';
 import type { ToolCall } from '@cellix/shared';
-import { readRange } from '../excel/reader';
-import { calculateCellCount, requiresConfirmation } from '../excel/validation';
-import { SAFETY_LIMITS } from '../constants';
-import { validateToolCall } from './validator';
 import type {
-  PreviewData,
-  CellChange,
   WriteRangeParams,
   SetFormulaParams,
   FormatRangeParams,
   AddTableParams,
   HighlightCellsParams,
-} from './types';
-import { isWriteTool } from './types';
+} from '@cellix/shared';
+import { readRange } from '../excel/reader';
+import { calculateCellCount, requiresConfirmation } from '../excel/validation';
+import { SAFETY_LIMITS } from '../constants';
+import { validateToolCall } from './validator';
+import type { PreviewData, CellChange } from './types';
 
 /**
  * Generates preview data for a tool call.
@@ -311,31 +310,6 @@ function buildCellChanges(
   }
 
   return changes;
-}
-
-/**
- * Converts column letter to number (A=1, B=2, etc.)
- */
-function columnToNumber(col: string): number {
-  let result = 0;
-  const upper = col.toUpperCase();
-  for (let i = 0; i < upper.length; i++) {
-    result = result * 26 + (upper.charCodeAt(i) - 64);
-  }
-  return result;
-}
-
-/**
- * Converts column number to letter (1=A, 2=B, etc.)
- */
-function numberToColumn(num: number): string {
-  let result = '';
-  while (num > 0) {
-    const remainder = (num - 1) % 26;
-    result = String.fromCharCode(65 + remainder) + result;
-    num = Math.floor((num - 1) / 26);
-  }
-  return result || 'A';
 }
 
 /**

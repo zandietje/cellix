@@ -5,6 +5,15 @@
 
 import type { ExcelContextFull } from '@cellix/shared';
 
+/** Maximum data types to show in context (keep prompt concise) */
+const MAX_DATA_TYPES_SHOWN = 15;
+
+/** Maximum numeric columns to show in context */
+const MAX_NUMERIC_COLUMNS_SHOWN = 8;
+
+/** Maximum sample data rows to show */
+const MAX_SAMPLE_ROWS = 10;
+
 /**
  * Formats Excel context for inclusion in the AI prompt.
  * Provides structured information about the user's current Excel state.
@@ -38,32 +47,32 @@ export function formatExcelContext(context: ExcelContextFull | undefined | null)
   // Data types per column
   if (context.dataTypes.length > 0) {
     lines.push('\n**Column Types:**');
-    for (const dt of context.dataTypes.slice(0, 15)) {
+    for (const dt of context.dataTypes.slice(0, MAX_DATA_TYPES_SHOWN)) {
       lines.push(`- ${dt.header}: ${dt.type}`);
     }
-    if (context.dataTypes.length > 15) {
-      lines.push(`- ... and ${context.dataTypes.length - 15} more columns`);
+    if (context.dataTypes.length > MAX_DATA_TYPES_SHOWN) {
+      lines.push(`- ... and ${context.dataTypes.length - MAX_DATA_TYPES_SHOWN} more columns`);
     }
   }
 
   // Numeric stats
   if (context.stats.numericColumns.length > 0) {
     lines.push('\n**Numeric Summary:**');
-    for (const col of context.stats.numericColumns.slice(0, 8)) {
+    for (const col of context.stats.numericColumns.slice(0, MAX_NUMERIC_COLUMNS_SHOWN)) {
       lines.push(
         `- ${col.header}: Sum=${formatNum(col.sum)}, Avg=${formatNum(col.avg)}, Min=${formatNum(col.min)}, Max=${formatNum(col.max)}, Count=${col.count}`
       );
     }
-    if (context.stats.numericColumns.length > 8) {
-      lines.push(`- ... and ${context.stats.numericColumns.length - 8} more numeric columns`);
+    if (context.stats.numericColumns.length > MAX_NUMERIC_COLUMNS_SHOWN) {
+      lines.push(`- ... and ${context.stats.numericColumns.length - MAX_NUMERIC_COLUMNS_SHOWN} more numeric columns`);
     }
   }
 
-  // Sample data (first 10 data rows for AI understanding)
+  // Sample data (first rows for AI understanding)
   if (context.selection.values.length > 1) {
-    lines.push('\n**Sample Data (first 10 rows):**');
+    lines.push(`\n**Sample Data (first ${MAX_SAMPLE_ROWS} rows):**`);
     lines.push('```');
-    const sample = context.selection.values.slice(0, 11); // Header + 10 data rows
+    const sample = context.selection.values.slice(0, MAX_SAMPLE_ROWS + 1); // Header + data rows
     for (const row of sample) {
       lines.push(row.map((cell) => formatCell(cell)).join('\t'));
     }

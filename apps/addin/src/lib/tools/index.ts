@@ -3,7 +3,7 @@
  */
 
 export * from './types';
-export * from './validator';
-export * from './preview';
-export * from './executor';
-export * from './audit';
+export { validateToolCall } from './validator';
+export { generatePreview } from './preview';
+export { executeToolCall, executeApprovedActions, cancelToolCall } from './executor';
+export { logToolExecution, getAuditLog } from './audit';

@@ -6,7 +6,7 @@
 import OpenAI from 'openai';
 import { encode } from 'gpt-tokenizer';
 import { env } from '../../lib/env.js';
-import type { AIProvider, ChatParams, ChatStreamEvent, ToolCallChunk } from './types.js';
+import type { AIProvider, ChatParams, ChatStreamEvent, ToolCallChunk, ToolChoice } from './types.js';
 
 export class OpenAIProvider implements AIProvider {
   private client: OpenAI;
@@ -20,12 +20,25 @@ export class OpenAIProvider implements AIProvider {
     });
   }
 
+  /**
+   * Convert our ToolChoice type to OpenAI's expected format
+   */
+  private formatToolChoice(
+    toolChoice: ToolChoice | undefined,
+    hasTools: boolean
+  ): 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } } | undefined {
+    if (!toolChoice || !hasTools) return undefined;
+    return toolChoice;
+  }
+
   async *chat(params: ChatParams): AsyncIterable<ChatStreamEvent> {
     try {
+      const hasTools = params.tools && params.tools.length > 0;
       const stream = await this.client.chat.completions.create({
         model: env.OPENAI_MODEL,
         messages: params.messages,
-        tools: params.tools && params.tools.length > 0 ? params.tools : undefined,
+        tools: hasTools ? params.tools : undefined,
+        tool_choice: this.formatToolChoice(params.toolChoice, !!hasTools),
         max_tokens: params.maxTokens ?? 4096,
         temperature: params.temperature ?? 0.7,
         stream: true,
@@ -71,12 +84,20 @@ export class OpenAIProvider implements AIProvider {
           }
         }
 
-        // Check for completion
-        if (choice.finish_reason === 'tool_calls') {
+        // Check for completion - emit tool_call_end for any finish reason if we have tool calls
+        if (choice.finish_reason && toolCalls.size > 0) {
           // Emit completed tool calls
           for (const tc of toolCalls.values()) {
             yield { type: 'tool_call_end', toolCall: { ...tc } };
           }
+          toolCalls.clear(); // Clear so we don't emit again
+        }
+      }
+
+      // Also emit any remaining tool calls if stream ended without finish_reason
+      if (toolCalls.size > 0) {
+        for (const tc of toolCalls.values()) {
+          yield { type: 'tool_call_end', toolCall: { ...tc } };
         }
       }
 

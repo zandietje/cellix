@@ -58,24 +58,3 @@ export function truncateToTokenLimit(text: string, limit: number): string {
   return truncated + '\n\n...[Content truncated due to length]';
 }
 
-/**
- * Check if adding new content would exceed the session token budget.
- */
-export function wouldExceedBudget(
-  currentTokens: number,
-  newContent: string,
-  budget: number = TOKEN_LIMITS.MAX_SESSION_TOKENS
-): boolean {
-  const newTokens = countTokens(newContent);
-  return currentTokens + newTokens > budget;
-}
-
-/**
- * Get remaining token budget for a session.
- */
-export function getRemainingBudget(
-  usedTokens: number,
-  budget: number = TOKEN_LIMITS.MAX_SESSION_TOKENS
-): number {
-  return Math.max(0, budget - usedTokens);
-}

@@ -115,7 +115,15 @@
       "Bash(git -C \"C:\\\\ZANDIT\\\\Cellix\" status)",
       "Bash(cmd /c \"dir /S /B apps packages\")",
       "Bash(git init:*)",
-      "Bash(gh auth:*)"
+      "Bash(gh auth:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(tasklist:*)",
+      "Bash(cmd /c \"tasklist /FI \"\"PID eq 1672\"\" & tasklist /FI \"\"PID eq 38192\"\"\")",
+      "Bash(timeout:*)",
+      "Bash(uuidgen:*)",
+      "Bash(ls:*)"
     ],
     "deny": []
   }
