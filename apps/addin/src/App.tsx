@@ -1,6 +1,7 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { TabNavigation } from './components/common/TabNavigation';
 import { ChatPane } from './components/chat/ChatPane';
+import { ControlPanel } from './components/controls/ControlPanel';
 import { Loading } from './components/common/Loading';
 import { useUIStore } from './store/uiStore';
 
@@ -12,6 +13,12 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
   },
   content: {
+    flex: 1,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  chatArea: {
     flex: 1,
     overflow: 'hidden',
   },
@@ -47,7 +54,14 @@ export default function App({ isOfficeInitialized }: AppProps) {
     <div className={styles.container}>
       <TabNavigation />
       <div className={styles.content}>
-        {activeTab === 'chat' && <ChatPane />}
+        {activeTab === 'chat' && (
+          <>
+            <ControlPanel />
+            <div className={styles.chatArea}>
+              <ChatPane />
+            </div>
+          </>
+        )}
         {activeTab === 'settings' && (
           <div className={styles.notInitialized}>
             Settings panel coming in a future release.
