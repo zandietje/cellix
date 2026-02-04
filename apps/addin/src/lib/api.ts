@@ -1,7 +1,33 @@
 import axios, { AxiosError } from 'axios';
 import type { ApiResponse, HealthResponse, ChatStreamEvent, ExcelContextFull } from '@cellix/shared';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+/**
+ * Get the API base URL.
+ * - In development: Uses '/api' which is proxied by Vite to http://localhost:3001
+ * - In production: Requires VITE_API_URL environment variable
+ */
+function getApiBaseUrl(): string {
+  const envUrl = import.meta.env.VITE_API_URL;
+
+  if (envUrl) {
+    return envUrl;
+  }
+
+  // In production, VITE_API_URL must be set
+  if (import.meta.env.PROD) {
+    console.error(
+      'VITE_API_URL environment variable is required in production. ' +
+        'Set it to the backend API URL (e.g., https://api.cellix.app/api)'
+    );
+    // Return a placeholder that will fail gracefully
+    return '/api';
+  }
+
+  // In development, use proxy path (Vite handles the proxy)
+  return '/api';
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

@@ -1,4 +1,6 @@
-import { makeStyles, tokens } from '@fluentui/react-components';
+import { useState, useCallback, useRef } from 'react';
+import { makeStyles, tokens, MessageBar, MessageBarBody, MessageBarActions, Button } from '@fluentui/react-components';
+import { DismissRegular } from '@fluentui/react-icons';
 import { MessageList } from './MessageList';
 import { InputBox } from './InputBox';
 import { TypingIndicator } from './TypingIndicator';
@@ -14,6 +16,9 @@ const useStyles = makeStyles({
     minHeight: 0,
     position: 'relative',
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  errorBar: {
+    flexShrink: 0,
   },
   messagesWrapper: {
     flex: 1,
@@ -41,23 +46,18 @@ export function ChatPane() {
   const { messages, isTyping, addMessage, updateLastAssistantMessage, setTyping } = useChatStore();
   const { context: excelContext } = useExcelStore();
 
-  const handleSend = async (content: string) => {
-    // Add user message
-    addMessage({ role: 'user', content });
+  // Error state for connection/streaming errors
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const lastMessageRef = useRef<string | null>(null);
 
-    // Create placeholder for assistant response
-    addMessage({ role: 'assistant', content: '' });
-    setTyping(true);
-
-    try {
+  const processStream = useCallback(
+    async (content: string) => {
       let fullContent = '';
       const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
 
-      // Stream the response from the backend
       for await (const event of streamChat(content, excelContext)) {
         switch (event.type) {
           case 'text':
-            // Accumulate text content
             if (event.content) {
               fullContent += event.content;
               updateLastAssistantMessage(fullContent, toolCalls);
@@ -66,7 +66,6 @@ export function ChatPane() {
 
           case 'tool_call_start':
           case 'tool_call_delta':
-            // Tool call is being built - update accumulator
             if (event.toolCall) {
               const existingIndex = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
               if (existingIndex >= 0) {
@@ -87,7 +86,6 @@ export function ChatPane() {
             break;
 
           case 'tool_call_end':
-            // Tool call is complete - update with final data
             if (event.toolCall) {
               const existingIndex = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
               if (existingIndex >= 0) {
@@ -108,27 +106,93 @@ export function ChatPane() {
             break;
 
           case 'error':
-            // Display error in the message
+            // AI service error - show in message
             fullContent += `\n\n*Error: ${event.error}*`;
             updateLastAssistantMessage(fullContent, toolCalls);
             break;
 
           case 'done':
-            // Stream complete
             break;
         }
       }
+    },
+    [excelContext, updateLastAssistantMessage]
+  );
+
+  const handleSend = useCallback(
+    async (content: string) => {
+      // Clear any previous error
+      setStreamError(null);
+      lastMessageRef.current = content;
+
+      // Add user message
+      addMessage({ role: 'user', content });
+
+      // Create placeholder for assistant response
+      addMessage({ role: 'assistant', content: '' });
+      setTyping(true);
+
+      try {
+        await processStream(content);
+      } catch (error) {
+        // Connection/network errors - show in error bar with retry option
+        const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
+        setStreamError(errorMessage);
+        updateLastAssistantMessage('*Connection error. See error message above.*', []);
+      } finally {
+        setTyping(false);
+      }
+    },
+    [addMessage, setTyping, processStream, updateLastAssistantMessage]
+  );
+
+  const handleRetry = useCallback(async () => {
+    if (!lastMessageRef.current) return;
+
+    setStreamError(null);
+    setTyping(true);
+
+    // Update the last assistant message to show retry in progress
+    updateLastAssistantMessage('', []);
+
+    try {
+      await processStream(lastMessageRef.current);
     } catch (error) {
-      // Handle fetch/network errors
       const errorMessage = error instanceof Error ? error.message : 'Failed to send message';
-      updateLastAssistantMessage(`*Error: ${errorMessage}*`, []);
+      setStreamError(errorMessage);
+      updateLastAssistantMessage('*Connection error. See error message above.*', []);
     } finally {
       setTyping(false);
     }
-  };
+  }, [processStream, setTyping, updateLastAssistantMessage]);
+
+  const handleDismissError = useCallback(() => {
+    setStreamError(null);
+  }, []);
 
   return (
     <div className={styles.container}>
+      {streamError && (
+        <div className={styles.errorBar}>
+          <MessageBar intent="error">
+            <MessageBarBody>{streamError}</MessageBarBody>
+            <MessageBarActions
+              containerAction={
+                <Button
+                  aria-label="dismiss"
+                  appearance="transparent"
+                  icon={<DismissRegular />}
+                  onClick={handleDismissError}
+                />
+              }
+            >
+              <Button size="small" onClick={handleRetry} disabled={isTyping}>
+                Retry
+              </Button>
+            </MessageBarActions>
+          </MessageBar>
+        </div>
+      )}
       <div className={styles.messagesWrapper}>
         <div className={styles.messages}>
           <MessageList messages={messages} />

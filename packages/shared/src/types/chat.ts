@@ -44,22 +44,8 @@ export interface ChatRequest {
   message: string;
   /** Session ID for conversation continuity */
   sessionId?: string;
-  /** Excel context from the add-in */
-  excelContext?: ExcelContext;
-}
-
-/** Excel context sent with chat requests */
-export interface ExcelContext {
-  /** Currently selected range address (e.g., "A1:C10") */
-  selectedRange?: string;
-  /** Values in the selected range (2D array) */
-  selectedValues?: unknown[][];
-  /** Active sheet name */
-  activeSheet?: string;
-  /** All sheet names in the workbook */
-  sheetNames?: string[];
-  /** Detected headers from selection */
-  headers?: string[];
+  /** Excel context from the add-in (uses full context type) */
+  excelContext?: import('./excel.js').ExcelContextFull;
 }
 
 /** Tool call data from streaming */
@@ -83,6 +69,3 @@ export interface ChatStreamEvent {
   /** Error message (for error events) */
   error?: string;
 }
-
-/** @deprecated Use ChatStreamEvent instead */
-export type ChatStreamChunk = ChatStreamEvent;
