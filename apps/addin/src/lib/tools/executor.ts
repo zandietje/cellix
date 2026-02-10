@@ -11,6 +11,11 @@ import type {
   CreateSheetParams,
   AddTableParams,
   HighlightCellsParams,
+  GetProfileParams,
+  SelectRowsParams,
+  GroupAggregateParams,
+  FindOutliersParams,
+  SearchValuesParams,
 } from '@cellix/shared';
 import {
   writeRange,
@@ -22,6 +27,13 @@ import {
 } from '../excel/writer';
 import { validateToolCall } from './validator';
 import { logToolExecution } from './audit';
+import {
+  executeGetProfile,
+  executeSelectRows,
+  executeGroupAggregate,
+  executeFindOutliers,
+  executeSearchValues,
+} from './readers';
 import type { ExecutionResult, PreviewData } from './types';
 
 /**
@@ -124,6 +136,42 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
         }
         cellsAffected = result.cellCount;
         resultData = { address: result.address };
+        break;
+      }
+
+      // Smart Retrieval Tools (Phase 5B) - Read-only operations
+      case 'get_profile': {
+        const params = toolCall.parameters as unknown as GetProfileParams;
+        const profile = await executeGetProfile(params);
+        resultData = profile as unknown as Record<string, unknown>;
+        break;
+      }
+
+      case 'select_rows': {
+        const params = toolCall.parameters as unknown as SelectRowsParams;
+        const rows = await executeSelectRows(params);
+        resultData = rows as unknown as Record<string, unknown>;
+        break;
+      }
+
+      case 'group_aggregate': {
+        const params = toolCall.parameters as unknown as GroupAggregateParams;
+        const groups = await executeGroupAggregate(params);
+        resultData = groups as unknown as Record<string, unknown>;
+        break;
+      }
+
+      case 'find_outliers': {
+        const params = toolCall.parameters as unknown as FindOutliersParams;
+        const outliers = await executeFindOutliers(params);
+        resultData = outliers as unknown as Record<string, unknown>;
+        break;
+      }
+
+      case 'search_values': {
+        const params = toolCall.parameters as unknown as SearchValuesParams;
+        const matches = await executeSearchValues(params);
+        resultData = matches as unknown as Record<string, unknown>;
         break;
       }
 

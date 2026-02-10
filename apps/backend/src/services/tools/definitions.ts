@@ -82,6 +82,33 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     'Provide actionable recommendations based on the data analysis performed.',
     schemas.suggestActionsSchema
   ),
+
+  // Smart Retrieval Tools (Phase 5B)
+  createToolDef(
+    'get_profile',
+    'Get metadata about a sheet including column names, types, statistics, and quality signals. Always call this first to understand the data structure before querying.',
+    schemas.getProfileSchema
+  ),
+  createToolDef(
+    'select_rows',
+    'Fetch filtered rows from a sheet. Supports filtering by column values, sorting, and pagination. Returns actual data rows.',
+    schemas.selectRowsSchema
+  ),
+  createToolDef(
+    'group_aggregate',
+    'Group data by columns and compute aggregations (sum, avg, min, max, count). Useful for summaries and totals.',
+    schemas.groupAggregateSchema
+  ),
+  createToolDef(
+    'find_outliers',
+    'Detect anomalies in a numeric column using statistical methods (z-score, IQR, or percentile).',
+    schemas.findOutliersSchema
+  ),
+  createToolDef(
+    'search_values',
+    'Search for specific values across columns. Supports exact and fuzzy matching.',
+    schemas.searchValuesSchema
+  ),
 ];
 
 /**

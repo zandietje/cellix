@@ -18,6 +18,7 @@
     "@cellix/shared": "workspace:*",
     "@fluentui/react-components": "^9.46.0",
     "@fluentui/react-icons": "^2.0.224",
+    "arquero": "^8.0.3",
     "axios": "^1.6.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -28,8 +29,8 @@
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
     "@vitejs/plugin-react-swc": "^3.5.0",
-    "office-addin-dev-certs": "^1.12.1",
     "office-addin-debugging": "^5.0.14",
+    "office-addin-dev-certs": "^1.12.1",
     "rimraf": "^5.0.5",
     "typescript": "^5.3.3",
     "vite": "^5.0.12"

@@ -35,6 +35,9 @@ importers:
       '@fluentui/react-icons':
         specifier: ^2.0.224
         version: 2.0.318(react@18.3.1)
+      arquero:
+        specifier: ^8.0.3
+        version: 8.0.3
       axios:
         specifier: ^1.6.5
         version: 1.13.4(debug@4.4.3)
@@ -1597,6 +1600,9 @@ packages:
   '@ungap/structured-clone@1.3.0':
     resolution: {integrity: sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==}
 
+  '@uwdata/flechette@2.3.0':
+    resolution: {integrity: sha512-FdTqVEJZL4MwTv+vY1jOUMW2i5pr/G5S4BGdmQ/7wSOCtA0I74UP117kzXiKe1FrB5+ydM4tFxrCdF8Dq9WgNA==}
+
   '@vitejs/plugin-react-swc@3.11.0':
     resolution: {integrity: sha512-YTJCGFdNMHCMfjODYtxRNVAYmTWQ1Lb8PulP/2/f/oEEtglw8oKxKIZmmRkyXrVrHfsKOaVkAc3NT9/dMutO5w==}
     peerDependencies:
@@ -1702,6 +1708,9 @@ packages:
 
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
+
+  arquero@8.0.3:
+    resolution: {integrity: sha512-7YQwe/GPVBUiahaPwEwgvu6VHyuhX0Ut61JZlIJYsAobOH5unLBwTmh43BobhX/N4dW1sb8WyKlQ8GjFq2whzQ==}
 
   array-flatten@1.1.1:
     resolution: {integrity: sha512-PCVAQswWemu6UdxsDFFX/+gVeYqKAod3D3UVm91jHwynguOwAvYPhx8nNlM++NqRcK6CxxpUafjmhIdKiHibqg==}
@@ -5838,6 +5847,8 @@ snapshots:
 
   '@ungap/structured-clone@1.3.0': {}
 
+  '@uwdata/flechette@2.3.0': {}
+
   '@vitejs/plugin-react-swc@3.11.0(@swc/helpers@0.5.18)(vite@5.4.21(@types/node@20.19.30)(terser@5.46.0))':
     dependencies:
       '@rolldown/pluginutils': 1.0.0-beta.27
@@ -5925,6 +5936,11 @@ snapshots:
       diagnostic-channel-publishers: 0.4.4(diagnostic-channel@0.3.1)
 
   argparse@2.0.1: {}
+
+  arquero@8.0.3:
+    dependencies:
+      '@uwdata/flechette': 2.3.0
+      acorn: 8.15.0
 
   array-flatten@1.1.1: {}
 

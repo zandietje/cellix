@@ -83,6 +83,65 @@ export const suggestActionsSchema = z.object({
 });
 
 // ============================================
+// Smart Retrieval Tools (Phase 5B)
+// ============================================
+
+/** Filter specification schema */
+const filterSpecSchema = z.object({
+  column: z.string().describe('Column name or letter'),
+  operator: z.enum(['eq', 'neq', 'gt', 'lt', 'gte', 'lte', 'contains', 'startsWith', 'between', 'in']),
+  value: z.unknown().describe('Value to compare against'),
+  value2: z.unknown().optional().describe('Second value for "between" operator'),
+});
+
+/** Get sheet profile */
+export const getProfileSchema = z.object({
+  sheet: z.string().optional().describe('Sheet name (defaults to active sheet)'),
+});
+
+/** Select filtered rows */
+export const selectRowsSchema = z.object({
+  sheet: z.string().optional().describe('Sheet name (defaults to active sheet)'),
+  columns: z.array(z.string()).describe('Column names or letters to return'),
+  filters: z.array(filterSpecSchema).optional().describe('Filter conditions'),
+  orderBy: z.object({
+    column: z.string(),
+    direction: z.enum(['asc', 'desc']),
+  }).optional().describe('Sort order'),
+  limit: z.number().max(500).default(50).describe('Max rows to return'),
+  offset: z.number().default(0).describe('Rows to skip'),
+});
+
+/** Group and aggregate */
+export const groupAggregateSchema = z.object({
+  sheet: z.string().optional().describe('Sheet name (defaults to active sheet)'),
+  groupBy: z.array(z.string()).describe('Columns to group by'),
+  metrics: z.array(z.object({
+    column: z.string(),
+    aggregation: z.enum(['sum', 'avg', 'min', 'max', 'count', 'countUnique']),
+  })).describe('Aggregations to compute'),
+  filters: z.array(filterSpecSchema).optional().describe('Pre-aggregation filters'),
+  limit: z.number().max(1000).default(100).describe('Max groups to return'),
+});
+
+/** Find outliers */
+export const findOutliersSchema = z.object({
+  sheet: z.string().optional().describe('Sheet name (defaults to active sheet)'),
+  column: z.string().describe('Numeric column to analyze'),
+  method: z.enum(['zscore', 'iqr', 'percentile']).describe('Detection method'),
+  threshold: z.number().default(2).describe('Threshold (z-score std devs, or percentile)'),
+  limit: z.number().max(100).default(20).describe('Max outliers to return'),
+});
+
+/** Search for values */
+export const searchValuesSchema = z.object({
+  query: z.string().describe('Search query'),
+  columns: z.array(z.string()).optional().describe('Columns to search (all if not specified)'),
+  fuzzy: z.boolean().default(false).describe('Enable fuzzy matching'),
+  limit: z.number().max(100).default(20).describe('Max results'),
+});
+
+// ============================================
 // Type exports - re-export from shared for consistency
 // ============================================
 
@@ -98,4 +157,10 @@ export type {
   ReadRangeParams,
   ExplainKpiParams,
   SuggestActionsParams,
+  FilterSpec,
+  GetProfileParams,
+  SelectRowsParams,
+  GroupAggregateParams,
+  FindOutliersParams,
+  SearchValuesParams,
 } from '@cellix/shared';

@@ -25,6 +25,11 @@ export const READ_TOOLS = [
   'get_selection',
   'get_sheet_names',
   'get_context',
+  'get_profile',
+  'select_rows',
+  'group_aggregate',
+  'find_outliers',
+  'search_values',
 ] as const;
 
 /** Names of analytics/reasoning tools */
@@ -136,6 +141,87 @@ export interface SuggestActionsParams {
   analysisContext: string;
 }
 
+// ============================================
+// Smart Retrieval Tool Parameters (Phase 5B)
+// ============================================
+
+/** Filter specification for queries */
+export interface FilterSpec {
+  /** Column name or letter */
+  column: string;
+  /** Comparison operator */
+  operator: 'eq' | 'neq' | 'gt' | 'lt' | 'gte' | 'lte' | 'contains' | 'startsWith' | 'between' | 'in';
+  /** Value to compare against */
+  value: unknown;
+  /** Second value for 'between' operator */
+  value2?: unknown;
+}
+
+/** Parameters for get_profile tool */
+export interface GetProfileParams {
+  /** Sheet name (defaults to active sheet) */
+  sheet?: string;
+}
+
+/** Parameters for select_rows tool */
+export interface SelectRowsParams {
+  /** Sheet name (defaults to active sheet) */
+  sheet?: string;
+  /** Column names or letters to return */
+  columns: string[];
+  /** Filter conditions */
+  filters?: FilterSpec[];
+  /** Sort order */
+  orderBy?: { column: string; direction: 'asc' | 'desc' };
+  /** Max rows to return (default 50, max 500) */
+  limit?: number;
+  /** Rows to skip (default 0) */
+  offset?: number;
+}
+
+/** Parameters for group_aggregate tool */
+export interface GroupAggregateParams {
+  /** Sheet name (defaults to active sheet) */
+  sheet?: string;
+  /** Columns to group by */
+  groupBy: string[];
+  /** Aggregations to compute */
+  metrics: Array<{
+    column: string;
+    aggregation: 'sum' | 'avg' | 'min' | 'max' | 'count' | 'countUnique';
+  }>;
+  /** Pre-aggregation filters */
+  filters?: FilterSpec[];
+  /** Max groups to return (default 100, max 1000) */
+  limit?: number;
+}
+
+/** Parameters for find_outliers tool */
+export interface FindOutliersParams {
+  /** Sheet name (defaults to active sheet) */
+  sheet?: string;
+  /** Numeric column to analyze */
+  column: string;
+  /** Detection method */
+  method: 'zscore' | 'iqr' | 'percentile';
+  /** Threshold (z-score std devs, or percentile) */
+  threshold?: number;
+  /** Max outliers to return (default 20, max 100) */
+  limit?: number;
+}
+
+/** Parameters for search_values tool */
+export interface SearchValuesParams {
+  /** Search query */
+  query: string;
+  /** Columns to search (all if not specified) */
+  columns?: string[];
+  /** Enable fuzzy matching */
+  fuzzy?: boolean;
+  /** Max results (default 20, max 100) */
+  limit?: number;
+}
+
 /** Union of all tool parameter types */
 export type ToolParams =
   | WriteRangeParams
@@ -146,4 +232,9 @@ export type ToolParams =
   | HighlightCellsParams
   | ReadRangeParams
   | ExplainKpiParams
-  | SuggestActionsParams;
+  | SuggestActionsParams
+  | GetProfileParams
+  | SelectRowsParams
+  | GroupAggregateParams
+  | FindOutliersParams
+  | SearchValuesParams;
