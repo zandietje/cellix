@@ -119,3 +119,28 @@ export interface WriteResult {
   /** Error message if failed */
   error?: string;
 }
+
+// Import profile types for ExcelContextWithProfile
+import type { SheetProfile, WorkbookInventory } from './profile.js';
+
+/** Selection info for profile-first context (no data by default) */
+export interface ProfileSelectionInfo {
+  /** Range address (e.g., "A1:C10") */
+  address: string;
+  /** Selection dimensions */
+  size: { rows: number; cols: number };
+  /** Only included if explicitly requested */
+  data?: unknown[][];
+}
+
+/** Profile-first context for AI (Phase 5C) */
+export interface ExcelContextWithProfile {
+  /** Active sheet profile */
+  profile: SheetProfile;
+  /** All sheets summary */
+  inventory: WorkbookInventory;
+  /** Current selection info (no data by default) */
+  selection: ProfileSelectionInfo;
+  /** Timestamp when context was extracted */
+  extractedAt: number;
+}

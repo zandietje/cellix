@@ -5,8 +5,8 @@
 
 import { invalidateProfile } from './profileCache';
 
-/** Debounce timeout handle */
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+/** Debounce timers per sheet (prevents race condition where one sheet's change cancels another's) */
+const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** Debounce delay in ms */
 const DEBOUNCE_DELAY = 2000;
@@ -61,19 +61,23 @@ export async function registerActiveSheetChangeListener(): Promise<void> {
 
 /**
  * Handle worksheet change event with debouncing.
+ * Each sheet has its own timer to prevent race conditions.
  */
 function handleSheetChange(sheetName: string, _event: Excel.WorksheetChangedEventArgs): void {
-  // Clear existing timer
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
+  // Clear existing timer for this specific sheet
+  const existingTimer = debounceTimers.get(sheetName);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
   }
 
-  // Set new timer
-  debounceTimer = setTimeout(() => {
+  // Set new timer for this sheet
+  const timer = setTimeout(() => {
     console.log(`[ProfileEvents] Invalidating profile for sheet: ${sheetName}`);
     invalidateProfile(sheetName);
-    debounceTimer = null;
+    debounceTimers.delete(sheetName);
   }, DEBOUNCE_DELAY);
+
+  debounceTimers.set(sheetName, timer);
 }
 
 /**
@@ -82,10 +86,11 @@ function handleSheetChange(sheetName: string, _event: Excel.WorksheetChangedEven
  */
 export function unregisterAllListeners(): void {
   registeredSheets.clear();
-  if (debounceTimer) {
-    clearTimeout(debounceTimer);
-    debounceTimer = null;
+  // Clear all pending timers
+  for (const timer of debounceTimers.values()) {
+    clearTimeout(timer);
   }
+  debounceTimers.clear();
 }
 
 /**

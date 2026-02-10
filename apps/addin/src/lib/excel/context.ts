@@ -11,7 +11,20 @@ import {
   getSheetNames,
   getTableMetadata,
 } from './reader';
-import type { ExcelContextFull, DataTypeInfo, BasicStats, DataType } from '@cellix/shared';
+import { extractSheetProfile, extractWorkbookInventory } from './profiler';
+import {
+  getCachedProfile,
+  setCachedProfile,
+  getCachedInventory,
+  setCachedInventory,
+} from './profileCache';
+import type {
+  ExcelContextFull,
+  ExcelContextWithProfile,
+  DataTypeInfo,
+  BasicStats,
+  DataType,
+} from '@cellix/shared';
 
 /**
  * Extracts full context from current Excel state.
@@ -217,5 +230,71 @@ function calculateStats(values: unknown[][], headers: string[]): BasicStats {
   }
 
   return { numericColumns };
+}
+
+/**
+ * Options for profile-first context extraction.
+ */
+export interface ProfileContextOptions {
+  /** Include selection data (default: false) */
+  includeData?: boolean;
+  /** Max rows if includeData is true (default: 50) */
+  dataLimit?: number;
+}
+
+/**
+ * Extract profile-first context for AI.
+ * Returns profile + selection address, no data by default.
+ * This is the recommended context extraction for Phase 5C+.
+ */
+export async function extractContextWithProfile(
+  options: ProfileContextOptions = {}
+): Promise<ExcelContextWithProfile> {
+  const { includeData = false, dataLimit = SAFETY_LIMITS.MAX_CONTEXT_ROWS } = options;
+
+  // Get inventory (cached or fresh)
+  let inventory = getCachedInventory();
+  if (!inventory) {
+    inventory = await extractWorkbookInventory();
+    setCachedInventory(inventory);
+  }
+
+  // Get active sheet profile (cached or fresh)
+  const activeSheetName = inventory.activeSheet;
+  let profile = getCachedProfile(activeSheetName);
+  if (!profile) {
+    profile = await extractSheetProfile(activeSheetName);
+    setCachedProfile(profile);
+  }
+
+  // Get selection info via Office.js
+  const selectionInfo = await Excel.run(async (context) => {
+    const range = context.workbook.getSelectedRange();
+    range.load(['address', 'rowCount', 'columnCount']);
+    if (includeData) {
+      range.load('values');
+    }
+    await context.sync();
+
+    // Parse address to remove sheet name prefix
+    const address = range.address.includes('!')
+      ? range.address.split('!')[1]
+      : range.address;
+
+    return {
+      address,
+      size: { rows: range.rowCount, cols: range.columnCount },
+      data: includeData
+        ? (range.values as unknown[][]).slice(0, dataLimit)
+        : undefined,
+    };
+  });
+
+  return {
+    profile,
+    inventory,
+    selection: selectionInfo,
+    extractedAt: Date.now(),
+  };
 }
 

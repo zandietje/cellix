@@ -24,6 +24,10 @@ const LIMITS = {
   GROUP_AGGREGATE: 1000,
   FIND_OUTLIERS: 100,
   SEARCH_VALUES: 100,
+  /** Chunk size for reading large sheets to prevent OOM */
+  CHUNK_SIZE: 5000,
+  /** Max rows to load for analysis (beyond this, we sample or warn) */
+  MAX_ANALYSIS_ROWS: 50000,
 };
 
 /** Result types */
@@ -408,7 +412,9 @@ export async function executeSearchValues(params: SearchValuesParams): Promise<S
 // ============================================
 
 /**
- * Read all data from a sheet.
+ * Read data from a sheet with chunking for large sheets.
+ * Prevents OOM by reading in chunks of CHUNK_SIZE rows.
+ * Caps total rows at MAX_ANALYSIS_ROWS for safety.
  */
 async function readSheetData(sheetName?: string): Promise<unknown[][]> {
   return Excel.run(async (context) => {
@@ -417,14 +423,41 @@ async function readSheetData(sheetName?: string): Promise<unknown[][]> {
       : context.workbook.worksheets.getActiveWorksheet();
 
     const usedRange = sheet.getUsedRangeOrNullObject();
-    usedRange.load('values');
+    usedRange.load(['rowCount', 'columnCount']);
     await context.sync();
 
     if (usedRange.isNullObject) {
       return [];
     }
 
-    return usedRange.values;
+    const totalRows = usedRange.rowCount;
+    const totalCols = usedRange.columnCount;
+
+    // For small sheets, read all at once (fast path)
+    if (totalRows <= LIMITS.CHUNK_SIZE) {
+      usedRange.load('values');
+      await context.sync();
+      return usedRange.values;
+    }
+
+    // For large sheets, read in chunks to prevent OOM
+    const rowsToRead = Math.min(totalRows, LIMITS.MAX_ANALYSIS_ROWS);
+    const allValues: unknown[][] = [];
+    const numChunks = Math.ceil(rowsToRead / LIMITS.CHUNK_SIZE);
+
+    for (let i = 0; i < numChunks; i++) {
+      const startRow = i * LIMITS.CHUNK_SIZE;
+      const chunkRows = Math.min(LIMITS.CHUNK_SIZE, rowsToRead - startRow);
+
+      // getRangeByIndexes is 0-based: (startRow, startCol, numRows, numCols)
+      const chunk = sheet.getRangeByIndexes(startRow, 0, chunkRows, totalCols);
+      chunk.load('values');
+      await context.sync();
+
+      allValues.push(...chunk.values);
+    }
+
+    return allValues;
   });
 }
 

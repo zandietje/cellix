@@ -1,12 +1,20 @@
 /**
  * Displays the current Excel context in a compact, readable format.
  * Shows selection info, size, warnings for large ranges, and basic stats.
+ * Supports both legacy ExcelContextFull and new ExcelContextWithProfile.
  */
 
 import { makeStyles, tokens, Text, Badge, Tooltip } from '@fluentui/react-components';
 import { Warning16Regular } from '@fluentui/react-icons';
-import type { ExcelContextFull } from '@cellix/shared';
+import type { ExcelContextFull, ExcelContextWithProfile } from '@cellix/shared';
 import { SAFETY_LIMITS } from '../../lib/constants';
+
+/** Helper to check if context is profile-first */
+function isProfileContext(
+  context: ExcelContextFull | ExcelContextWithProfile
+): context is ExcelContextWithProfile {
+  return 'profile' in context && 'inventory' in context;
+}
 
 const useStyles = makeStyles({
   container: {
@@ -41,11 +49,92 @@ const useStyles = makeStyles({
 });
 
 interface ContextDisplayProps {
-  context: ExcelContextFull;
+  context: ExcelContextFull | ExcelContextWithProfile;
 }
 
 export function ContextDisplay({ context }: ContextDisplayProps) {
   const styles = useStyles();
+
+  // Handle both context types
+  if (isProfileContext(context)) {
+    return <ProfileContextDisplay context={context} styles={styles} />;
+  }
+
+  return <LegacyContextDisplay context={context} styles={styles} />;
+}
+
+/** Display for profile-first context (Phase 5C) */
+function ProfileContextDisplay({
+  context,
+  styles,
+}: {
+  context: ExcelContextWithProfile;
+  styles: ReturnType<typeof useStyles>;
+}) {
+  const totalCells = context.selection.size.rows * context.selection.size.cols;
+  const isLarge = totalCells > SAFETY_LIMITS.CONFIRM_THRESHOLD_CELLS;
+
+  return (
+    <div className={styles.container}>
+      <div className={styles.row}>
+        <Text size={200} className={styles.label}>
+          Selection:
+        </Text>
+        <Text size={200} className={styles.value}>
+          {context.selection.address}
+        </Text>
+      </div>
+
+      <div className={styles.row}>
+        <Text size={200} className={styles.label}>
+          Size:
+        </Text>
+        <Text size={200}>
+          {context.selection.size.rows} rows x {context.selection.size.cols} cols (
+          {totalCells.toLocaleString()} cells)
+        </Text>
+        {isLarge && (
+          <Tooltip
+            content="Large selections may require confirmation for write operations"
+            relationship="label"
+          >
+            <Badge appearance="filled" color="warning" size="small">
+              Large
+            </Badge>
+          </Tooltip>
+        )}
+      </div>
+
+      <div className={styles.row}>
+        <Text size={200} className={styles.label}>
+          Sheet:
+        </Text>
+        <Text size={200}>{context.profile.sheetName}</Text>
+        <Badge appearance="outline" size="small">
+          {context.profile.rowCount.toLocaleString()} rows
+        </Badge>
+      </div>
+
+      {context.profile.columns.length > 0 && (
+        <div className={styles.stats}>
+          <Text size={200}>
+            Columns: {context.profile.columns.map((c) => c.header || c.letter).slice(0, 5).join(', ')}
+            {context.profile.columns.length > 5 && ` +${context.profile.columns.length - 5} more`}
+          </Text>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Display for legacy full context */
+function LegacyContextDisplay({
+  context,
+  styles,
+}: {
+  context: ExcelContextFull;
+  styles: ReturnType<typeof useStyles>;
+}) {
   const totalCells = context.selection.rowCount * context.selection.columnCount;
   const isLarge = totalCells > SAFETY_LIMITS.CONFIRM_THRESHOLD_CELLS;
 

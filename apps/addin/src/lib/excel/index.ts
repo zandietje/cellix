@@ -7,3 +7,5 @@ export * from './reader';
 export * from './writer';
 export * from './context';
 export * from './validation';
+export * from './profiler';
+export * from './profileCache';

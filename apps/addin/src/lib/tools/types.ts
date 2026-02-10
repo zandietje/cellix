@@ -77,6 +77,10 @@ export interface PreviewData {
   validation: ValidationResult;
   /** Timestamp when preview was generated */
   generatedAt: number;
+  /** Original cell values before the change (for undo capability) */
+  beforeValues?: unknown[][];
+  /** The reason the AI wants to make this change (from tool call) */
+  reason?: string;
 }
 
 /** Result of executing a single tool call */

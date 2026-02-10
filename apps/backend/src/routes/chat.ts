@@ -12,13 +12,14 @@ import {
   getAIProvider,
   SYSTEM_PROMPT,
   formatExcelContext,
+  formatProfileContext,
   planToolCall,
   isValidToolPlan,
 } from '../services/ai/index.js';
 import type { ToolChoice } from '../services/ai/types.js';
 import { TOOL_DEFINITIONS } from '../services/tools/index.js';
 import { TOKEN_LIMITS, countTokens, truncateToTokenLimit } from '../lib/tokens.js';
-import type { ExcelContextFull } from '@cellix/shared';
+import type { ExcelContextFull, ExcelContextWithProfile } from '@cellix/shared';
 
 /** Request body schema */
 const chatRequestSchema = z.object({
@@ -52,7 +53,18 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       const { message, excelContext } = parseResult.data;
 
       // Build system prompt with Excel context
-      const contextText = formatExcelContext(excelContext as ExcelContextFull | undefined);
+      // Detect which context type and format accordingly (profile-first vs legacy)
+      let contextText: string;
+      if (excelContext?.profile && excelContext?.inventory) {
+        // New profile-first context (Phase 5C)
+        contextText = formatProfileContext(excelContext as ExcelContextWithProfile);
+      } else if (excelContext?.selection) {
+        // Legacy full context (backwards compatible)
+        contextText = formatExcelContext(excelContext as ExcelContextFull);
+      } else {
+        contextText = '';
+      }
+
       let systemContent = SYSTEM_PROMPT + contextText;
 
       // Check token limits and truncate if needed
@@ -84,16 +96,38 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       // ═══════════════════════════════════════════════════════════
       // STAGE 1: PLANNER - Detect intent and select tool
       // ═══════════════════════════════════════════════════════════
-      const typedContext = excelContext as ExcelContextFull | undefined;
-      const excelContextForPlanner = typedContext
-        ? {
-            selection: typedContext.selection?.address,
-            rows: typedContext.selection?.rowCount,
-            cols: typedContext.selection?.columnCount,
-            sheet: typedContext.activeSheet,
-            hasData: (typedContext.selection?.values?.length ?? 0) > 0,
+      // Build planner context from either profile-first or legacy context
+      let excelContextForPlanner:
+        | {
+            selection?: string;
+            rows?: number;
+            cols?: number;
+            sheet?: string;
+            hasData?: boolean;
           }
-        : undefined;
+        | undefined;
+
+      if (excelContext?.profile && excelContext?.inventory) {
+        // Profile-first context
+        const profileCtx = excelContext as ExcelContextWithProfile;
+        excelContextForPlanner = {
+          selection: profileCtx.selection?.address,
+          rows: profileCtx.selection?.size?.rows,
+          cols: profileCtx.selection?.size?.cols,
+          sheet: profileCtx.profile?.sheetName,
+          hasData: !!profileCtx.selection?.data,
+        };
+      } else if (excelContext?.selection) {
+        // Legacy context
+        const legacyCtx = excelContext as ExcelContextFull;
+        excelContextForPlanner = {
+          selection: legacyCtx.selection?.address,
+          rows: legacyCtx.selection?.rowCount,
+          cols: legacyCtx.selection?.columnCount,
+          sheet: legacyCtx.activeSheet,
+          hasData: (legacyCtx.selection?.values?.length ?? 0) > 0,
+        };
+      }
 
       let plan;
       try {
@@ -201,8 +235,15 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
 
       const { message, excelContext } = parseResult.data;
 
-      // Build messages
-      const contextText = formatExcelContext(excelContext as ExcelContextFull | undefined);
+      // Build messages - detect context type
+      let contextText: string;
+      if (excelContext?.profile && excelContext?.inventory) {
+        contextText = formatProfileContext(excelContext as ExcelContextWithProfile);
+      } else if (excelContext?.selection) {
+        contextText = formatExcelContext(excelContext as ExcelContextFull);
+      } else {
+        contextText = '';
+      }
       const systemContent = SYSTEM_PROMPT + contextText;
 
       const messages = [

@@ -4,11 +4,14 @@
  */
 
 import { create } from 'zustand';
-import type { ExcelContextFull } from '@cellix/shared';
+import type { ExcelContextFull, ExcelContextWithProfile } from '@cellix/shared';
+
+/** Context can be either profile-first or legacy full context */
+export type ExcelContext = ExcelContextFull | ExcelContextWithProfile;
 
 interface ExcelState {
-  /** Current Excel context */
-  context: ExcelContextFull | null;
+  /** Current Excel context (profile-first or legacy) */
+  context: ExcelContext | null;
   /** Whether context is being loaded */
   isLoading: boolean;
   /** Error message if context extraction failed */
@@ -17,7 +20,7 @@ interface ExcelState {
   lastRefresh: number | null;
 
   /** Set the current context */
-  setContext: (context: ExcelContextFull | null) => void;
+  setContext: (context: ExcelContext | null) => void;
   /** Set loading state */
   setLoading: (isLoading: boolean) => void;
   /** Set error state */

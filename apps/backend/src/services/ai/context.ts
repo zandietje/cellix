@@ -1,9 +1,14 @@
 /**
  * Excel context formatting for AI prompts.
- * Converts ExcelContextFull to a readable string for the AI.
+ * Converts ExcelContextFull or ExcelContextWithProfile to a readable string for the AI.
  */
 
-import type { ExcelContextFull } from '@cellix/shared';
+import type {
+  ExcelContextFull,
+  ExcelContextWithProfile,
+  SheetProfile,
+  ColumnProfile,
+} from '@cellix/shared';
 
 /** Maximum data types to show in context (keep prompt concise) */
 const MAX_DATA_TYPES_SHOWN = 15;
@@ -118,4 +123,142 @@ function formatCell(cell: unknown): string {
     return str.slice(0, 47) + '...';
   }
   return str;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PROFILE-FIRST CONTEXT FORMATTING (Phase 5C)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Maximum columns to show in profile (keep prompt concise) */
+const MAX_PROFILE_COLUMNS = 20;
+
+/** Maximum quality warnings to show */
+const MAX_QUALITY_WARNINGS = 5;
+
+/**
+ * Format profile-first context for AI prompt.
+ * Compact representation (~500 tokens for typical sheet).
+ */
+export function formatProfileContext(
+  context: ExcelContextWithProfile | null | undefined
+): string {
+  if (!context) return '';
+
+  const lines: string[] = [];
+  const { profile, inventory, selection } = context;
+
+  lines.push('\n## Excel Context\n');
+
+  // Sheet summary
+  lines.push(`**Sheet:** "${profile.sheetName}"`);
+  lines.push(
+    `**Size:** ${profile.rowCount.toLocaleString()} rows x ${profile.columnCount} columns`
+  );
+  lines.push(
+    `**Selection:** ${selection.address} (${selection.size.rows}x${selection.size.cols})`
+  );
+
+  // Tables
+  if (profile.tables.length > 0) {
+    lines.push(`**Tables:** ${profile.tables.map((t) => t.name).join(', ')}`);
+  }
+
+  // Column summary table
+  if (profile.columns.length > 0) {
+    lines.push('\n### Columns\n');
+    lines.push('| Col | Header | Type | Semantic | Info |');
+    lines.push('|-----|--------|------|----------|------|');
+
+    for (const col of profile.columns.slice(0, MAX_PROFILE_COLUMNS)) {
+      const header = col.header ? escapeMarkdown(col.header) : '-';
+      const info = formatColumnInfo(col);
+      lines.push(
+        `| ${col.letter} | ${header} | ${col.dataType} | ${col.inferredName} | ${info} |`
+      );
+    }
+
+    if (profile.columns.length > MAX_PROFILE_COLUMNS) {
+      lines.push(
+        `| ... | *${profile.columns.length - MAX_PROFILE_COLUMNS} more columns* | | | |`
+      );
+    }
+  }
+
+  // Quality warnings
+  const warnings = getQualityWarnings(profile);
+  if (warnings.length > 0) {
+    lines.push('\n### Data Quality Notes');
+    for (const warning of warnings) {
+      lines.push(`- ${warning}`);
+    }
+  }
+
+  // Other sheets
+  const otherSheets = inventory.sheets.filter((s) => !s.isActive);
+  if (otherSheets.length > 0) {
+    lines.push(
+      `\n**Other Sheets:** ${otherSheets.map((s) => `${s.name} (${s.rowCount.toLocaleString()} rows)`).join(', ')}`
+    );
+  }
+
+  // Usage hint for AI
+  lines.push(
+    '\n*Use `get_profile`, `select_rows`, or `group_aggregate` to query specific data.*'
+  );
+
+  return lines.join('\n');
+}
+
+/**
+ * Format column info for the profile table.
+ */
+function formatColumnInfo(col: ColumnProfile): string {
+  const parts: string[] = [];
+
+  if (col.stats) {
+    parts.push(`Sum: ${formatNum(col.stats.sum)}, Avg: ${formatNum(col.stats.avg)}`);
+  } else if (col.uniqueCount > 0) {
+    parts.push(`${col.uniqueCount} unique`);
+  }
+
+  if (col.samples.length > 0 && col.dataType === 'text') {
+    const sampleText = col.samples
+      .slice(0, 2)
+      .map((s) => escapeMarkdown(String(s).slice(0, 15)))
+      .join(', ');
+    parts.push(`e.g. ${sampleText}`);
+  }
+
+  return parts.join('; ') || '-';
+}
+
+/**
+ * Get quality warnings from a profile.
+ */
+function getQualityWarnings(profile: SheetProfile): string[] {
+  const warnings: string[] = [];
+
+  for (const col of profile.columns) {
+    const header = col.header || col.letter;
+
+    if (col.quality.completeness < 0.9 && col.quality.completeness > 0) {
+      const pct = Math.round((1 - col.quality.completeness) * 100);
+      warnings.push(`Column ${col.letter} (${header}) has ${pct}% missing values`);
+    }
+    if (col.quality.hasMixedTypes) {
+      warnings.push(`Column ${col.letter} (${header}) has mixed data types`);
+    }
+    if (col.quality.hasOutliers) {
+      warnings.push(`Column ${col.letter} (${header}) contains outliers`);
+    }
+  }
+
+  return warnings.slice(0, MAX_QUALITY_WARNINGS);
+}
+
+/**
+ * Escape markdown special characters in a string.
+ */
+function escapeMarkdown(str: string): string {
+  return str.replace(/[|\\`*_{}[\]()#+\-.!]/g, '\\$&');
 }

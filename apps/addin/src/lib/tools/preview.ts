@@ -80,12 +80,13 @@ async function generateWriteRangePreview(
   const cellCount = params.values ? params.values.length * (params.values[0]?.length || 0) : 0;
 
   let changes: CellChange[] = [];
+  let beforeValues: unknown[][] = [];
 
   if (validation.valid && params.address && params.values) {
     try {
-      // Try to read current values
-      const currentValues = await readRange(params.address);
-      changes = buildCellChanges(params.address, currentValues, params.values);
+      // Try to read current values (also stored for undo)
+      beforeValues = await readRange(params.address);
+      changes = buildCellChanges(params.address, beforeValues, params.values);
     } catch {
       // Range might not exist yet, build changes with empty current values
       changes = buildCellChanges(params.address, [], params.values);
@@ -107,6 +108,8 @@ async function generateWriteRangePreview(
     requiresConfirmation: requiresConfirmation(cellCount),
     validation,
     generatedAt: Date.now(),
+    beforeValues: beforeValues.length > 0 ? beforeValues : undefined,
+    reason: params.reason,
   };
 }
 
@@ -120,11 +123,12 @@ async function generateSetFormulaPreview(
 ): Promise<PreviewData> {
   const params = toolCall.parameters as unknown as SetFormulaParams;
   let changes: CellChange[] = [];
+  let beforeValues: unknown[][] = [];
 
   if (validation.valid && params.address) {
     try {
-      const currentValues = await readRange(params.address);
-      const currentValue = currentValues[0]?.[0];
+      beforeValues = await readRange(params.address);
+      const currentValue = beforeValues[0]?.[0];
       changes = [
         {
           address: params.address,
@@ -158,6 +162,8 @@ async function generateSetFormulaPreview(
     requiresConfirmation: false, // Single cell formula doesn't need confirmation
     validation,
     generatedAt: Date.now(),
+    beforeValues: beforeValues.length > 0 ? beforeValues : undefined,
+    reason: params.reason,
   };
 }
 
@@ -187,6 +193,7 @@ async function generateFormatRangePreview(
     requiresConfirmation: requiresConfirmation(cellCount),
     validation,
     generatedAt: Date.now(),
+    reason: params.reason,
   };
 }
 
@@ -198,6 +205,8 @@ async function generateCreateSheetPreview(
   validation: ReturnType<typeof validateToolCall>,
   warnings: string[]
 ): Promise<PreviewData> {
+  const params = toolCall.parameters as { name?: string; reason?: string };
+
   return {
     toolCall,
     affectedRange: '', // No range for sheet creation
@@ -207,6 +216,7 @@ async function generateCreateSheetPreview(
     requiresConfirmation: true, // Sheet creation always requires confirmation
     validation,
     generatedAt: Date.now(),
+    reason: params.reason,
   };
 }
 
@@ -232,6 +242,7 @@ async function generateAddTablePreview(
     requiresConfirmation: true, // Table creation always requires confirmation
     validation,
     generatedAt: Date.now(),
+    reason: params.reason,
   };
 }
 
@@ -257,6 +268,7 @@ async function generateHighlightCellsPreview(
     requiresConfirmation: requiresConfirmation(cellCount),
     validation,
     generatedAt: Date.now(),
+    reason: params.reason,
   };
 }
 

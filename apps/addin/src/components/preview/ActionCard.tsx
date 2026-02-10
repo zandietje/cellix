@@ -97,12 +97,9 @@ export function ActionCard({ preview, onApprove, onReject, disabled }: ActionCar
   const styles = useStyles();
   const [showDiff, setShowDiff] = useState(false);
 
-  const { toolCall, affectedRange, cellCount, changes, warnings, validation } = preview;
+  const { toolCall, affectedRange, cellCount, changes, warnings, validation, reason } = preview;
   const hasErrors = !validation.valid;
   const hasWarnings = warnings.length > 0;
-
-  // Extract reason from parameters
-  const reason = (toolCall.parameters as { reason?: string }).reason;
 
   // Format tool name for display
   const formatToolName = (name: string) => {
@@ -161,7 +158,8 @@ export function ActionCard({ preview, onApprove, onReject, disabled }: ActionCar
 
           {reason && (
             <div className={styles.reason}>
-              <Text size={200}>"{reason}"</Text>
+              <Text size={200} weight="semibold">Why: </Text>
+              <Text size={200}>{reason}</Text>
             </div>
           )}
 

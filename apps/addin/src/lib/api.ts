@@ -1,5 +1,14 @@
 import axios, { AxiosError } from 'axios';
-import type { ApiResponse, HealthResponse, ChatStreamEvent, ExcelContextFull } from '@cellix/shared';
+import type {
+  ApiResponse,
+  HealthResponse,
+  ChatStreamEvent,
+  ExcelContextFull,
+  ExcelContextWithProfile,
+} from '@cellix/shared';
+
+/** Context type that can be sent to the API (either legacy or profile-first) */
+export type ChatContext = ExcelContextFull | ExcelContextWithProfile;
 
 /**
  * Get the API base URL.
@@ -70,10 +79,11 @@ export async function getHealthStatus(): Promise<HealthResponse | null> {
 /**
  * Send a chat message and stream the response via SSE.
  * Yields ChatStreamEvent objects as they arrive from the backend.
+ * Accepts either profile-first or legacy context.
  */
 export async function* streamChat(
   message: string,
-  excelContext?: ExcelContextFull | null
+  excelContext?: ChatContext | null
 ): AsyncGenerator<ChatStreamEvent, void, unknown> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: 'POST',
@@ -139,10 +149,11 @@ export async function* streamChat(
 
 /**
  * Send a chat message (non-streaming, for testing).
+ * Accepts either profile-first or legacy context.
  */
 export async function sendChatSync(
   message: string,
-  excelContext?: ExcelContextFull | null
+  excelContext?: ChatContext | null
 ): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; parameters: Record<string, unknown> }> }> {
   const response = await apiClient.post('/chat/sync', {
     message,
