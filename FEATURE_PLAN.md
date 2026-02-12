@@ -73,7 +73,8 @@ An Excel Office.js Add-in that provides an AI-powered chat assistant specialized
 | State Management | Zustand | MVP |
 | UI Components | Fluent UI React v9 | MVP |
 | HTTP Client | Axios | MVP |
-| Real-time | Socket.io Client | Phase 7+ |
+| Data Processing | Arquero (~105KB) | Phase 5 |
+| Real-time | Socket.io Client | Phase 8+ |
 
 ### Backend
 | Component | Technology | Phase |
@@ -81,9 +82,9 @@ An Excel Office.js Add-in that provides an AI-powered chat assistant specialized
 | Runtime | Node.js 20 LTS | MVP |
 | Framework | Fastify | MVP |
 | AI Provider | OpenAI (Claude-ready abstraction) | MVP |
-| Embeddings | text-embedding-3-small | Phase 5 |
-| Vector DB | Supabase pgvector | Phase 5 |
-| Queue | Bull + Redis | Phase 9 |
+| Embeddings | text-embedding-3-small | Phase 6 |
+| Vector DB | Supabase pgvector | Phase 6 |
+| Queue | Bull + Redis | Phase 10 |
 | Validation | Zod | MVP |
 | Auth | Supabase Auth | MVP |
 
@@ -92,9 +93,9 @@ An Excel Office.js Add-in that provides an AI-powered chat assistant specialized
 |-----------|------------|-------|
 | Hosting | Vercel (add-in) + Railway/Render (backend) | MVP |
 | Database | Supabase (Postgres) | MVP |
-| Vector Extension | pgvector | Phase 5 |
-| Cache | Redis (Upstash) | Phase 5+ |
-| Monitoring | Sentry | Phase 12 |
+| Vector Extension | pgvector | Phase 6 |
+| Cache | Redis (Upstash) | Phase 6+ |
+| Monitoring | Sentry | Phase 13 |
 
 > **MVP Principle:** Only install dependencies when needed. Start lean.
 
@@ -116,14 +117,15 @@ An Excel Office.js Add-in that provides an AI-powered chat assistant specialized
 
 | Phase | Name | Priority | Dependency |
 |-------|------|----------|------------|
-| 5 | RAG Knowledge | High | Validates knowledge retrieval value |
-| 6 | Data Connectors | High | Requires Shopee/Lazada OAuth approval |
-| 7 | Anomaly Detection | Medium | Requires Phase 6 data |
-| 8 | Comparison Intelligence | Medium | Requires Phase 6 data |
-| 9 | Report Generation | Medium | Core MVP working |
-| 10 | Template Library | Low | After reports work |
-| 11 | Notifications | Low | After alerts work |
-| 12 | Production Polish | High | Before AppSource |
+| 5 | Sheet Intelligence | High | Enables LLM to understand large Excel files |
+| 6 | RAG Knowledge | High | Validates knowledge retrieval value |
+| 7 | Data Connectors | High | Requires Shopee/Lazada OAuth approval |
+| 8 | Anomaly Detection | Medium | Requires Phase 7 data |
+| 9 | Comparison Intelligence | Medium | Requires Phase 7 data |
+| 10 | Report Generation | Medium | Core MVP working |
+| 11 | Template Library | Low | After reports work |
+| 12 | Notifications | Low | After alerts work |
+| 13 | Production Polish | High | Before AppSource |
 
 ---
 
@@ -314,12 +316,432 @@ An Excel Office.js Add-in that provides an AI-powered chat assistant specialized
 
 ---
 
-## PHASE 5: RAG Knowledge System (Post-MVP)
-**Goal:** Domain knowledge retrieval for ecommerce context
-**Priority:** High - Enhances AI accuracy
+## PHASE 5: Sheet Intelligence System (Post-MVP)
+**Goal:** Enable LLM to understand and query large Excel files intelligently
+**Priority:** High - Foundation for accurate analysis of real-world data
 **Prerequisite:** MVP validated with users
 
-### 5.1 Supabase Vector Setup
+### Problem Statement
+Current approach sends up to 1000 cells (50 rows × 20 cols) regardless of the question. This is:
+- **Wasteful**: Most questions need only 2-5 columns
+- **Lossy**: Large sheets get sampled, losing important data
+- **Blind**: LLM can't reason about data it hasn't seen
+
+### Solution: Profile-First Architecture
+```
+Current Flow:
+User Question → Extract Full Context (1000 cells) → Send to LLM → LLM Reasons
+
+New Flow:
+User Question → Send Profile Only (~500 tokens) → LLM Plans Query →
+Execute Targeted Fetch (50-200 cells) → LLM Analyzes → Response
+```
+
+---
+
+### 5A: Sheet Profile System (Week 1)
+
+**Goal:** Build a cached metadata layer about workbook structure
+
+#### 5A.1 Profile Types (`packages/shared/src/types/profile.ts`)
+- [ ] Define `SheetProfile` interface
+  - sheetName, usedRange, rowCount, columnCount
+  - columns: ColumnProfile[]
+  - tables: TableInfo[]
+  - extractedAt, version
+- [ ] Define `ColumnProfile` interface
+  - index, header, inferredName (semantic: "date", "sku", "revenue")
+  - dataType, stats, samples (first 3 values)
+  - uniqueCount, nullCount, quality signals
+- [ ] Define `QualitySignals` interface
+  - hasDuplicates, hasMixedTypes, hasOutliers, completeness (0-1)
+- [ ] Define `WorkbookInventory` for lightweight all-sheets summary
+
+#### 5A.2 Profile Extractor (`apps/addin/src/lib/excel/profiler.ts`)
+- [ ] `extractSheetProfile(sheetName?)` - Full profile for one sheet
+- [ ] `extractWorkbookInventory()` - Lightweight all-sheets summary
+- [ ] `detectColumnSemantics(headers, samples)` - Infer column meanings
+  - Pattern matching for SKU, OrderId, dates, currencies
+  - Header name matching ("SKU", "Product ID", "Revenue", etc.)
+  - Value distribution analysis
+- [ ] `calculateColumnStats(values)` - Streaming stats calculation
+- [ ] `detectQualityIssues(column)` - Find duplicates, mixed types, outliers
+- [ ] Chunked reading for large sheets (5000 rows per chunk)
+
+#### 5A.3 Profile Cache (`apps/addin/src/lib/excel/profileCache.ts`)
+- [ ] In-memory cache with localStorage backup
+- [ ] Version tracking for invalidation
+- [ ] `getProfile(sheet)` - Get cached or extract new
+- [ ] `invalidate(sheet)` - Mark sheet profile as stale
+- [ ] `invalidateAll()` - Clear entire cache
+
+#### 5A.4 Profile Event Listeners
+- [ ] Listen for `worksheet.onChanged` events
+- [ ] Debounced profile invalidation (wait 2s after last change)
+- [ ] Re-extract on next context request
+- [ ] Background extraction with progress indicator
+
+#### 5A.5 Add Arquero for Data Processing
+Arquero is a lightweight (~105KB) JavaScript library for query processing and transformation of array-backed data tables. It handles 1M+ rows in the browser with zero network latency.
+
+- [ ] Install `arquero` package in add-in
+- [ ] Create `apps/addin/src/lib/data/arquero.ts` wrapper utilities
+- [ ] Implement table creation from Excel data: `aq.from(values, { columns })`
+- [ ] Expose common operations:
+  ```typescript
+  // Filter rows
+  table.filter(d => d.date >= startDate && d.category === 'Electronics')
+
+  // Group and aggregate
+  table.groupby('category').rollup({
+    total: d => op.sum(d.revenue),
+    avg: d => op.mean(d.revenue),
+    count: d => op.count()
+  })
+
+  // Statistics
+  table.rollup({
+    min: d => op.min(d.value),
+    max: d => op.max(d.value),
+    stdev: d => op.stdev(d.value),
+    median: d => op.median(d.value)
+  })
+
+  // Outlier detection (z-score)
+  const stats = table.rollup({ mean: d => op.mean(d.value), std: d => op.stdev(d.value) });
+  table.derive({ zscore: d => (d.value - stats.mean) / stats.std })
+        .filter(d => Math.abs(d.zscore) > threshold)
+  ```
+- [ ] Create helper for streaming large datasets through Arquero
+
+**Why Arquero over Python/Pandas:**
+- Data already in browser via Office.js (no network round-trip)
+- 105KB vs deploying separate Python service
+- Handles typical ecommerce data sizes (10K-1M rows)
+- dplyr-like fluent API, well-maintained by UW Interactive Data Lab
+
+**Deliverable:** Cached sheet metadata that persists across questions + Arquero-powered data processing
+
+---
+
+### 5B: Smart Retrieval Tools (Week 2)
+
+**Goal:** Let the LLM request specific data slices instead of receiving everything
+
+#### 5B.1 New Read Tool Schemas (`apps/backend/src/services/tools/schemas.ts`)
+
+```typescript
+// Get sheet profile (always call first)
+get_profile: {
+  sheet: z.string().optional()  // Default: active sheet
+}
+
+// Fetch filtered, projected rows
+select_rows: {
+  sheet: z.string().optional(),
+  columns: z.array(z.string()),     // Column letters or headers
+  filters: z.array(z.object({
+    column: z.string(),
+    operator: z.enum(["eq", "neq", "gt", "lt", "gte", "lte",
+                      "contains", "startsWith", "between", "in"]),
+    value: z.unknown(),
+    value2: z.unknown().optional()  // For "between"
+  })).optional(),
+  orderBy: z.object({
+    column: z.string(),
+    direction: z.enum(["asc", "desc"])
+  }).optional(),
+  limit: z.number().default(50),
+  offset: z.number().default(0)
+}
+
+// Get aggregated data
+group_aggregate: {
+  sheet: z.string().optional(),
+  groupBy: z.array(z.string()),     // Columns to group by
+  metrics: z.array(z.object({
+    column: z.string(),
+    aggregation: z.enum(["sum", "avg", "min", "max", "count", "countUnique"])
+  })),
+  filters: z.array(FilterSpec).optional(),
+  orderBy: z.object({
+    metric: z.string(),
+    direction: z.enum(["asc", "desc"])
+  }).optional(),
+  limit: z.number().default(100)
+}
+
+// Detect anomalies in a column
+find_outliers: {
+  sheet: z.string().optional(),
+  column: z.string(),
+  method: z.enum(["zscore", "iqr", "percentile"]),
+  threshold: z.number().default(2),  // 2 std devs or 1.5 IQR
+  limit: z.number().default(20)
+}
+
+// Search for specific values
+search_values: {
+  query: z.string(),
+  columns: z.array(z.string()).optional(),  // Search all if not specified
+  fuzzy: z.boolean().default(false),
+  limit: z.number().default(20)
+}
+```
+
+#### 5B.2 Read Tool Executors (`apps/addin/src/lib/tools/readers.ts`)
+All executors use **Arquero** for data processing (see 5A.5).
+
+- [ ] `executeSelectRows()` - Filter and project data using Arquero
+  ```typescript
+  const result = aq.from(data)
+    .filter(buildFilterPredicate(params.filters))
+    .select(params.columns)
+    .orderby(params.orderBy ? aq.desc(params.orderBy.column) : undefined)
+    .slice(params.offset, params.offset + params.limit)
+    .objects();
+  ```
+  - Date parsing for date filters
+  - Numeric comparison for number filters
+  - String matching (contains, startsWith)
+  - Column resolution (letter or header name)
+
+- [ ] `executeGroupAggregate()` - Aggregate data by groups using Arquero
+  ```typescript
+  const result = aq.from(data)
+    .filter(buildFilterPredicate(params.filters))
+    .groupby(params.groupBy)
+    .rollup(buildMetrics(params.metrics))  // { total: d => op.sum(d.revenue) }
+    .orderby(aq.desc(params.orderBy?.metric))
+    .slice(0, params.limit)
+    .objects();
+  ```
+  - Supports: sum, avg, min, max, count, countUnique
+  - Automatic null handling
+
+- [ ] `executeFindOutliers()` - Detect anomalies using Arquero
+  ```typescript
+  // Z-score method
+  const stats = aq.from(data).rollup({
+    mean: d => op.mean(d[column]),
+    std: d => op.stdev(d[column])
+  }).object();
+
+  const result = aq.from(data)
+    .derive({ zscore: d => Math.abs((d[column] - stats.mean) / stats.std) })
+    .filter(d => d.zscore > threshold)
+    .orderby(aq.desc('zscore'))
+    .slice(0, params.limit)
+    .objects();
+  ```
+  - Z-score method: (value - mean) / stddev > threshold
+  - IQR method: value < Q1 - 1.5*IQR or value > Q3 + 1.5*IQR
+  - Percentile method: value outside p5-p95
+- [ ] `executeSearchValues()` - Find matching rows
+  - Exact match
+  - Fuzzy matching (Levenshtein distance)
+  - Multi-column search
+
+#### 5B.3 Update AI System Prompt
+- [ ] Document new tools with examples
+- [ ] Add "Query Planning" section to prompt
+- [ ] Emphasize: "Use get_profile first, then select_rows/group_aggregate"
+- [ ] Examples of good query plans:
+  ```
+  User: "What's my ROAS for electronics last week?"
+  Plan:
+  1. get_profile() → Find date column, category column, revenue/spend columns
+  2. select_rows(columns: [date, category, revenue, adSpend],
+                 filters: [{column: date, op: gte, value: "2024-01-01"},
+                          {column: category, op: eq, value: "Electronics"}])
+  3. Calculate ROAS from results
+  ```
+
+**Deliverable:** LLM can request exactly the data it needs
+
+---
+
+### 5C: Profile-First Context Flow (Week 3)
+
+**Goal:** Change context extraction to send profile first, data on demand
+
+#### 5C.1 Modify Context Extraction (`apps/addin/src/lib/excel/context.ts`)
+- [ ] New `extractContextWithProfile()` function
+  ```typescript
+  async function extractContextWithProfile(options?: {
+    includeData?: boolean,
+    dataLimit?: number
+  }): Promise<ExcelContextWithProfile>
+  ```
+- [ ] Default behavior: Profile + selection address only (no data)
+- [ ] Optional: Include sampled data for simple questions
+- [ ] Return structure:
+  ```typescript
+  {
+    profile: SheetProfile,
+    inventory: WorkbookInventory,  // All sheets summary
+    selection: {
+      address: string,
+      size: { rows: number, cols: number },
+      data?: unknown[][]  // Only if includeData=true
+    }
+  }
+  ```
+
+#### 5C.2 Update Backend Context Formatter (`apps/backend/src/services/ai/context.ts`)
+- [ ] New `formatProfileContext()` function
+- [ ] Compact profile representation (~500 tokens for typical sheet)
+  ```
+  ## Sheet Profile: "Sales Data"
+  Rows: 15,234 | Columns: 12 | Tables: 1
+
+  ### Columns:
+  | # | Header | Type | Semantic | Stats |
+  |---|--------|------|----------|-------|
+  | A | Date | date | order_date | 2024-01-01 to 2024-12-31 |
+  | B | SKU | text | product_id | 1,523 unique |
+  | C | Category | text | category | 5 unique: Electronics, Fashion, ... |
+  | D | Revenue | currency | revenue | Sum: $1.2M, Avg: $78.50 |
+  | E | Ad Spend | currency | ad_spend | Sum: $245K, Avg: $16.10 |
+  ...
+
+  ### Quality Notes:
+  - Column F has 12% missing values
+  - Column H has mixed types (89% numbers, 11% text)
+  ```
+- [ ] Include column relationships if detected
+- [ ] Include quality warnings
+
+#### 5C.3 Update Chat Route (`apps/backend/src/routes/chat.ts`)
+- [ ] First message: Send profile only
+- [ ] Track tool results in conversation
+- [ ] If LLM requests data via tool: Execute and include in next context
+- [ ] Token budget management for tool results
+
+#### 5C.4 Question Classification
+- [ ] Add question type detection to planner:
+  - `structural`: "what sheets exist?" → Profile only
+  - `lookup`: "what's in cell A1?" → Single cell fetch
+  - `analytical`: "what's my avg ROAS?" → Filtered slice
+  - `comparative`: "compare this week vs last" → Two time slices
+  - `exploratory`: "what stands out?" → Profile + outliers
+- [ ] Use question type to determine initial context depth
+
+**Deliverable:** Context extraction is intelligent and token-efficient
+
+---
+
+### 5D: Office.js Performance Optimization (Week 4)
+
+**Goal:** Handle large sheets (100K+ rows) without hitting limits
+
+#### 5D.1 Chunked Range Reader (`apps/addin/src/lib/excel/chunkedReader.ts`)
+- [ ] `readLargeRange()` function
+  ```typescript
+  async function readLargeRange(
+    address: string,
+    options: {
+      chunkSize?: number;      // Default 5000 rows
+      columns?: string[];      // Only load specific columns
+      onProgress?: (percent: number) => void;
+      abortSignal?: AbortSignal;
+    }
+  ): Promise<unknown[][]>
+  ```
+- [ ] Automatic chunking based on range size
+- [ ] Memory-efficient streaming with generators
+- [ ] Progress reporting for UI feedback
+- [ ] Abort support for cancellation
+
+#### 5D.2 Streaming Aggregators (`apps/addin/src/lib/excel/streamingStats.ts`)
+- [ ] Compute stats without loading all data at once
+- [ ] `StreamingStats` class:
+  ```typescript
+  class StreamingStats {
+    add(value: number): void;
+    getSum(): number;
+    getCount(): number;
+    getAvg(): number;
+    getMin(): number;
+    getMax(): number;
+    getStdDev(): number;  // Welford's algorithm
+  }
+  ```
+- [ ] `StreamingPercentiles` for outlier detection (reservoir sampling)
+- [ ] `StreamingUnique` for cardinality estimation (HyperLogLog optional)
+
+#### 5D.3 Background Profiling
+- [ ] Profile extraction runs in background on sheet activation
+- [ ] UI shows "Analyzing sheet..." indicator
+- [ ] Profile available for next question
+- [ ] Progressive profiling:
+  - Level 0: Sheet names + used ranges (instant)
+  - Level 1: Headers + row counts (on sheet focus)
+  - Level 2: Column types + basic stats (on first question)
+  - Level 3: Relationships + quality signals (on complex questions)
+
+#### 5D.4 Memory Management
+- [ ] Clear large arrays after processing
+- [ ] Use generators for streaming where possible
+- [ ] Monitor memory usage (log warnings if high)
+- [ ] Graceful degradation for very large sheets
+
+#### 5D.5 Office.js Best Practices
+- [ ] Batch all operations in single `Excel.run()`
+- [ ] Minimize `context.sync()` calls
+- [ ] Load only needed properties: `range.load("values")` not `range.load()`
+- [ ] Use `range.track()` for long-running operations
+- [ ] Suspend calculation during large writes: `context.application.suspendApiCalculationUntilNextSync()`
+
+**Deliverable:** Add-in handles 100K+ row sheets without performance issues
+
+---
+
+### Phase 5 Tool Reference
+
+#### New Read Tools (Phase 5)
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `get_profile` | sheet? | Get sheet metadata and column info |
+| `select_rows` | columns, filters, orderBy, limit, offset | Fetch filtered rows |
+| `group_aggregate` | groupBy, metrics, filters, limit | Get aggregated data |
+| `find_outliers` | column, method, threshold, limit | Detect anomalies |
+| `search_values` | query, columns, fuzzy, limit | Search for values |
+
+---
+
+### Phase 5 Success Metrics
+
+| Metric | Target | How to Measure |
+|--------|--------|----------------|
+| Context token reduction | 50-70% fewer tokens | Compare avg tokens before/after |
+| Query accuracy | >90% correct data fetched | Manual review of 50 queries |
+| Profile extraction time | <2s for 50K rows | Performance logging |
+| Large sheet support | 100K+ rows without error | Test with large files |
+| LLM query planning | >80% use profile first | Log tool call patterns |
+
+---
+
+### Phase 5 Risks & Mitigations
+
+| Risk | Likelihood | Mitigation |
+|------|------------|------------|
+| Column inference is wrong | High | Let LLM correct, store user corrections |
+| Profile extraction is slow | Medium | Background + progressive levels |
+| Query planning adds latency | Medium | Cache common patterns, parallel profile |
+| Office.js limits hit | Low | Chunking, tested limits, fallbacks |
+| LLM ignores profile | Medium | Strong prompt guidance + examples |
+
+**Deliverable:** LLM can intelligently understand and query large Excel files
+
+---
+
+## PHASE 6: RAG Knowledge System (Post-MVP)
+**Goal:** Domain knowledge retrieval for ecommerce context
+**Priority:** High - Enhances AI accuracy
+**Prerequisite:** Phase 5 complete (profile system provides better context for RAG)
+
+### 6.1 Supabase Vector Setup
 - [ ] Create embeddings table schema
 - [ ] Setup pgvector extension
 - [ ] Create similarity search function
@@ -342,14 +764,14 @@ create table knowledge_chunks (
 -- Categories: kpi_definition, platform_metric, glossary, formula_rule, report_convention
 ```
 
-### 5.2 Embedding Pipeline
+### 6.2 Embedding Pipeline
 - [ ] Text chunking utility (500 tokens, 100 overlap)
 - [ ] Markdown parser
 - [ ] Batch embedding generation
 - [ ] Upsert to Supabase
 - [ ] Source tracking
 
-### 5.3 Seed Knowledge Documents
+### 6.3 Seed Knowledge Documents
 
 #### ecommerce_kpis.md
 ```markdown
@@ -398,14 +820,14 @@ create table knowledge_chunks (
 - Common SUMIF/VLOOKUP patterns for ecommerce
 ```
 
-### 5.4 Retrieval Service
+### 6.4 Retrieval Service
 - [ ] Query embedding generation
 - [ ] Similarity search with threshold
 - [ ] Category filtering
 - [ ] Result ranking
 - [ ] Context formatting for prompt
 
-### 5.5 RAG Integration
+### 6.5 RAG Integration
 - [ ] Inject retrieved chunks into prompt
 - [ ] Source attribution in responses
 - [ ] Confidence scoring
@@ -415,7 +837,7 @@ create table knowledge_chunks (
 
 ---
 
-## PHASE 6: Data Connectors (Post-MVP)
+## PHASE 7: Data Connectors (Post-MVP)
 **Goal:** Connect to Shopee and Lazada APIs
 **Priority:** High - Key value prop, but requires OAuth approval (can take weeks)
 **Prerequisite:** MVP validated, OAuth apps approved by platforms
@@ -472,9 +894,9 @@ create table knowledge_chunks (
 
 ---
 
-## PHASE 7: Anomaly Detection (Post-MVP)
+## PHASE 8: Anomaly Detection (Post-MVP)
 **Goal:** Proactive alerts for metric anomalies
-**Priority:** Medium - Requires Phase 6 data connectors
+**Priority:** Medium - Requires Phase 7 data connectors
 **Adds:** Socket.io for real-time alerts
 
 ### 7.1 Anomaly Detection Engine
@@ -521,9 +943,9 @@ create table knowledge_chunks (
 
 ---
 
-## PHASE 8: Comparison Intelligence (Post-MVP)
+## PHASE 9: Comparison Intelligence (Post-MVP)
 **Goal:** Cross-platform and period comparisons
-**Priority:** Medium - Requires Phase 6 data connectors
+**Priority:** Medium - Requires Phase 7 data connectors
 
 ### 8.1 Comparison Engine
 - [ ] Period-over-period calculation
@@ -561,9 +983,9 @@ create table knowledge_chunks (
 
 ---
 
-## PHASE 9: Report Generation (Post-MVP)
+## PHASE 10: Report Generation (Post-MVP)
 **Goal:** Automated report creation in Excel
-**Priority:** Medium - Can work with MVP tools, but better with Phase 6 data
+**Priority:** Medium - Can work with MVP tools, but better with Phase 7 data
 **Adds:** Bull + Redis for background report generation
 
 ### 9.1 Report Templates
@@ -601,7 +1023,7 @@ create table knowledge_chunks (
 
 ---
 
-## PHASE 10: Template Library (Post-MVP)
+## PHASE 11: Template Library (Post-MVP)
 **Goal:** Pre-built sheets for common analytics tasks
 **Priority:** Low - Nice-to-have, not core value
 
@@ -656,9 +1078,9 @@ create table knowledge_chunks (
 
 ---
 
-## PHASE 11: Notifications & Integrations (Post-MVP)
+## PHASE 12: Notifications & Integrations (Post-MVP)
 **Goal:** Push alerts to external channels
-**Priority:** Low - Requires Phase 7 alerts to be useful
+**Priority:** Low - Requires Phase 8 alerts to be useful
 
 ### 11.1 Notification Service
 - [ ] Notification queue (Bull + Redis)
@@ -695,7 +1117,7 @@ create table knowledge_chunks (
 
 ---
 
-## PHASE 12: Polish & Production (Pre-AppSource)
+## PHASE 13: Polish & Production (Pre-AppSource)
 **Goal:** Production-ready add-in
 **Priority:** High - Required before AppSource submission
 **Note:** Some items (basic auth, error handling) should be done incrementally during MVP
@@ -777,7 +1199,16 @@ create table knowledge_chunks (
 
 ### Post-MVP Tools
 
-#### Data Tools (Phase 6+)
+#### Sheet Intelligence Tools (Phase 5)
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `get_profile` | sheet? | Get sheet metadata and column info |
+| `select_rows` | columns, filters, orderBy, limit, offset | Fetch filtered rows |
+| `group_aggregate` | groupBy, metrics, filters, limit | Get aggregated data |
+| `find_outliers` | column, method, threshold, limit | Detect anomalies in column |
+| `search_values` | query, columns, fuzzy, limit | Search for values |
+
+#### Data Tools (Phase 7+)
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `sync_orders` | platform, date_range | Pull orders from platform |
@@ -785,13 +1216,13 @@ create table knowledge_chunks (
 | `import_to_sheet` | data_type, destination | Import synced data to Excel |
 | `refresh_data` | data_source | Refresh existing imported data |
 
-#### Comparison Tools (Phase 8+)
+#### Comparison Tools (Phase 9+)
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `compare_platforms` | metric, date_range | Compare Shopee vs Lazada |
 | `detect_anomalies` | data_context | Find unusual patterns |
 
-#### Report Tools (Phase 9+)
+#### Report Tools (Phase 10+)
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `generate_report` | template, params | Create report from template |
@@ -1115,10 +1546,11 @@ cellix/
 | Milestone | Phases | Timeline | Goal |
 |-----------|--------|----------|------|
 | **M1: MVP** | Phase 1-4 | Weeks 1-6 | Core chat with Excel read/write, preview-first safety |
-| **M2: Smart Assistant** | Phase 5-6 | Post-MVP | RAG knowledge + Data connectors |
-| **M3: Proactive Intelligence** | Phase 7-8 | Post-MVP | Anomaly detection + Comparisons |
-| **M4: Automation** | Phase 9-10 | Post-MVP | Reports + Templates |
-| **M5: Enterprise Ready** | Phase 11-12 | Post-MVP | Notifications + Production polish |
+| **M2: Sheet Intelligence** | Phase 5 | Post-MVP | Profile system, smart retrieval, large file support |
+| **M3: Smart Assistant** | Phase 6-7 | Post-MVP | RAG knowledge + Data connectors |
+| **M4: Proactive Intelligence** | Phase 8-9 | Post-MVP | Anomaly detection + Comparisons |
+| **M5: Automation** | Phase 10-11 | Post-MVP | Reports + Templates |
+| **M6: Enterprise Ready** | Phase 12-13 | Post-MVP | Notifications + Production polish |
 
 > **Focus:** Complete M1 (MVP) before starting M2. Validate with real users first.
 

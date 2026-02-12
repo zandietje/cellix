@@ -14,6 +14,7 @@
   "dependencies": {
     "@cellix/shared": "workspace:*",
     "@fastify/cors": "^9.0.1",
+    "@supabase/supabase-js": "^2.95.3",
     "dotenv": "^17.2.3",
     "fastify": "^4.25.2",
     "gpt-tokenizer": "^3.4.0",

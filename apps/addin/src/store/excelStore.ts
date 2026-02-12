@@ -4,7 +4,7 @@
  */
 
 import { create } from 'zustand';
-import type { ExcelContextFull, ExcelContextWithProfile } from '@cellix/shared';
+import type { ExcelContextFull, ExcelContextWithProfile, ProfilingLevel } from '@cellix/shared';
 
 /** Context can be either profile-first or legacy full context */
 export type ExcelContext = ExcelContextFull | ExcelContextWithProfile;
@@ -19,6 +19,13 @@ interface ExcelState {
   /** Last time context was refreshed */
   lastRefresh: number | null;
 
+  /** Profiling progress (0-1) */
+  profilingProgress: number;
+  /** Whether profile is being loaded/extracted */
+  isProfileLoading: boolean;
+  /** Current profiling level being extracted */
+  currentProfilingLevel: ProfilingLevel | null;
+
   /** Set the current context */
   setContext: (context: ExcelContext | null) => void;
   /** Set loading state */
@@ -27,6 +34,11 @@ interface ExcelState {
   setError: (error: string | null) => void;
   /** Clear context and error */
   reset: () => void;
+
+  /** Set profiling progress (0-1) */
+  setProfilingProgress: (progress: number) => void;
+  /** Set profile loading state */
+  setProfileLoading: (loading: boolean, level?: ProfilingLevel | null) => void;
 }
 
 export const useExcelStore = create<ExcelState>((set) => ({
@@ -34,6 +46,9 @@ export const useExcelStore = create<ExcelState>((set) => ({
   isLoading: false,
   error: null,
   lastRefresh: null,
+  profilingProgress: 0,
+  isProfileLoading: false,
+  currentProfilingLevel: null,
 
   setContext: (context) =>
     set({
@@ -52,5 +67,17 @@ export const useExcelStore = create<ExcelState>((set) => ({
       error: null,
       isLoading: false,
       lastRefresh: null,
+      profilingProgress: 0,
+      isProfileLoading: false,
+      currentProfilingLevel: null,
+    }),
+
+  setProfilingProgress: (progress) => set({ profilingProgress: progress }),
+
+  setProfileLoading: (loading, level = null) =>
+    set({
+      isProfileLoading: loading,
+      currentProfilingLevel: level,
+      profilingProgress: loading ? 0 : 1,
     }),
 }));

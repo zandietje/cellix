@@ -61,11 +61,13 @@ export interface ToolCallChunk {
 /** Streaming chat response event (matches backend ChatStreamEvent) */
 export interface ChatStreamEvent {
   /** Type of event */
-  type: 'text' | 'tool_call_start' | 'tool_call_delta' | 'tool_call_end' | 'done' | 'error';
+  type: 'text' | 'tool_call_start' | 'tool_call_delta' | 'tool_call_end' | 'session' | 'done' | 'error';
   /** Text content (for text events) */
   content?: string;
   /** Tool call data (for tool_call events) */
   toolCall?: ToolCallChunk;
+  /** Session ID (for session events) */
+  sessionId?: string;
   /** Error message (for error events) */
   error?: string;
 }

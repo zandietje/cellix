@@ -52,6 +52,11 @@ export function isWriteTool(name: string): name is WriteToolName {
   return WRITE_TOOLS.includes(name as WriteToolName);
 }
 
+/** Check if a tool name is a read-only tool */
+export function isReadTool(name: string): name is ReadToolName {
+  return READ_TOOLS.includes(name as ReadToolName);
+}
+
 /** Check if a tool name is valid */
 export function isValidTool(name: string): name is ToolName {
   return ALL_TOOLS.includes(name as ToolName);
@@ -125,6 +130,32 @@ export interface HighlightCellsParams {
 export interface ReadRangeParams {
   /** Range to read in A1 notation */
   address: string;
+  /** Whether first row contains headers */
+  includeHeaders?: boolean;
+}
+
+/** Parameters for get_selection tool */
+export interface GetSelectionParams {
+  /** Whether to include cell values (false for just address/size) */
+  includeValues?: boolean;
+  /** Maximum rows to return if includeValues is true */
+  maxRows?: number;
+}
+
+/** Parameters for get_sheet_names tool */
+export interface GetSheetNamesParams {
+  /** Whether to include hidden sheets */
+  includeHidden?: boolean;
+}
+
+/** Parameters for get_context tool */
+export interface GetContextParams {
+  /** Include current selection data */
+  includeSelection?: boolean;
+  /** Include Excel table information */
+  includeTables?: boolean;
+  /** Include full sheet profile (slower) */
+  includeProfile?: boolean;
 }
 
 /** Parameters for explain_kpi tool */
@@ -231,6 +262,9 @@ export type ToolParams =
   | AddTableParams
   | HighlightCellsParams
   | ReadRangeParams
+  | GetSelectionParams
+  | GetSheetNamesParams
+  | GetContextParams
   | ExplainKpiParams
   | SuggestActionsParams
   | GetProfileParams

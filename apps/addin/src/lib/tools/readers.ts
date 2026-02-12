@@ -9,6 +9,10 @@ import type {
   GroupAggregateParams,
   FindOutliersParams,
   SearchValuesParams,
+  ReadRangeParams,
+  GetSelectionParams,
+  GetSheetNamesParams,
+  GetContextParams,
   FilterSpec,
   SheetProfile,
   DataType,
@@ -16,7 +20,16 @@ import type {
 import { columnToNumber } from '@cellix/shared';
 import { extractSheetProfile } from '../excel/profiler';
 import { getCachedProfile, setCachedProfile } from '../excel/profileCache';
+import {
+  readRange as readRangeHelper,
+  getSelectedRangeValues,
+  getSelectedRangeAddress,
+  getActiveSheetName,
+  getSheetNames,
+  getTableMetadata,
+} from '../excel/reader';
 import { aq, createTable, type ColumnTable } from '../data/arquero';
+import type { ExecutionResult } from './types';
 
 /** Safety limits */
 const LIMITS = {
@@ -405,6 +418,163 @@ export async function executeSearchValues(params: SearchValuesParams): Promise<S
     .slice(0, limit);
 
   return { matches, total: matches.length };
+}
+
+// ============================================
+// Basic Read Tool Executors
+// ============================================
+
+/**
+ * Execute read_range tool.
+ */
+export async function executeReadRange(params: ReadRangeParams): Promise<ExecutionResult> {
+  try {
+    const values = await readRangeHelper(params.address);
+
+    const includeHeaders = params.includeHeaders !== false;
+    const headers = includeHeaders && values.length > 0
+      ? (values[0] as unknown[]).map(v => String(v ?? ''))
+      : null;
+
+    const data = includeHeaders && values.length > 1
+      ? values.slice(1)
+      : values;
+
+    return {
+      success: true,
+      toolCallId: '',
+      cellsAffected: 0,
+      executionTimeMs: 0,
+      resultData: {
+        address: params.address,
+        headers,
+        data,
+        rowCount: data.length,
+        columnCount: data[0]?.length ?? 0,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      toolCallId: '',
+      cellsAffected: 0,
+      executionTimeMs: 0,
+      error: error instanceof Error ? error.message : 'Failed to read range',
+    };
+  }
+}
+
+/**
+ * Execute get_selection tool.
+ */
+export async function executeGetSelection(params: GetSelectionParams): Promise<ExecutionResult> {
+  try {
+    const address = await getSelectedRangeAddress();
+
+    let values: unknown[][] | null = null;
+    if (params.includeValues !== false) {
+      const allValues = await getSelectedRangeValues();
+      const maxRows = params.maxRows ?? 100;
+      values = allValues.slice(0, maxRows);
+    }
+
+    return {
+      success: true,
+      toolCallId: '',
+      cellsAffected: 0,
+      executionTimeMs: 0,
+      resultData: {
+        address,
+        values,
+        rowCount: values?.length ?? 0,
+        columnCount: values?.[0]?.length ?? 0,
+        truncated: values !== null && params.maxRows != null
+          ? values.length >= params.maxRows
+          : false,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      toolCallId: '',
+      cellsAffected: 0,
+      executionTimeMs: 0,
+      error: error instanceof Error ? error.message : 'Failed to get selection',
+    };
+  }
+}
+
+/**
+ * Execute get_sheet_names tool.
+ */
+export async function executeGetSheetNames(_params: GetSheetNamesParams): Promise<ExecutionResult> {
+  try {
+    const sheets = await getSheetNames();
+    const activeSheet = await getActiveSheetName();
+
+    return {
+      success: true,
+      toolCallId: '',
+      cellsAffected: 0,
+      executionTimeMs: 0,
+      resultData: {
+        sheets,
+        activeSheet,
+        count: sheets.length,
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      toolCallId: '',
+      cellsAffected: 0,
+      executionTimeMs: 0,
+      error: error instanceof Error ? error.message : 'Failed to get sheet names',
+    };
+  }
+}
+
+/**
+ * Execute get_context tool.
+ */
+export async function executeGetContext(params: GetContextParams): Promise<ExecutionResult> {
+  try {
+    const context: Record<string, unknown> = {
+      activeSheet: await getActiveSheetName(),
+      allSheets: await getSheetNames(),
+    };
+
+    if (params.includeSelection !== false) {
+      context.selection = {
+        address: await getSelectedRangeAddress(),
+        values: await getSelectedRangeValues(),
+      };
+    }
+
+    if (params.includeTables !== false) {
+      context.tables = await getTableMetadata();
+    }
+
+    if (params.includeProfile) {
+      context.profile = await extractSheetProfile();
+    }
+
+    return {
+      success: true,
+      toolCallId: '',
+      cellsAffected: 0,
+      executionTimeMs: 0,
+      resultData: context,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      toolCallId: '',
+      cellsAffected: 0,
+      executionTimeMs: 0,
+      error: error instanceof Error ? error.message : 'Failed to get context',
+    };
+  }
 }
 
 // ============================================

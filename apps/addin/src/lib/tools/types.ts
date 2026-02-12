@@ -16,7 +16,7 @@ export type {
   WriteToolName,
 } from '@cellix/shared';
 
-export { WRITE_TOOLS, isWriteTool } from '@cellix/shared';
+export { WRITE_TOOLS, READ_TOOLS, isWriteTool, isReadTool } from '@cellix/shared';
 
 /** Error codes for validation failures */
 export type ValidationErrorCode =

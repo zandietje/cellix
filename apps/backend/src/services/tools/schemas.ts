@@ -64,7 +64,49 @@ export const highlightCellsSchema = z.object({
 
 /** Read values from a specific range */
 export const readRangeSchema = z.object({
-  address: z.string().describe('Range to read in A1 notation'),
+  address: z.string()
+    .min(1, 'Address is required')
+    .describe('Excel range address (e.g., "A1:C10", "Sheet1!A1:B5")'),
+  includeHeaders: z.boolean()
+    .optional()
+    .default(true)
+    .describe('Whether first row contains headers'),
+});
+
+/** Get current user selection */
+export const getSelectionSchema = z.object({
+  includeValues: z.boolean()
+    .optional()
+    .default(true)
+    .describe('Whether to include cell values (false for just address/size)'),
+  maxRows: z.number()
+    .optional()
+    .default(100)
+    .describe('Maximum rows to return if includeValues is true'),
+});
+
+/** List all worksheets */
+export const getSheetNamesSchema = z.object({
+  includeHidden: z.boolean()
+    .optional()
+    .default(false)
+    .describe('Whether to include hidden sheets'),
+});
+
+/** Get comprehensive Excel context */
+export const getContextSchema = z.object({
+  includeSelection: z.boolean()
+    .optional()
+    .default(true)
+    .describe('Include current selection data'),
+  includeTables: z.boolean()
+    .optional()
+    .default(true)
+    .describe('Include Excel table information'),
+  includeProfile: z.boolean()
+    .optional()
+    .default(false)
+    .describe('Include full sheet profile (slower)'),
 });
 
 // ============================================
@@ -155,6 +197,9 @@ export type {
   AddTableParams,
   HighlightCellsParams,
   ReadRangeParams,
+  GetSelectionParams,
+  GetSheetNamesParams,
+  GetContextParams,
   ExplainKpiParams,
   SuggestActionsParams,
   FilterSpec,

@@ -6,6 +6,8 @@ interface ChatState {
   messages: ChatMessage[];
   /** Whether the assistant is currently responding */
   isTyping: boolean;
+  /** Whether tools are being executed (feedback loop phase) */
+  isExecutingTools: boolean;
   /** Current session ID */
   sessionId: string | null;
 
@@ -18,17 +20,24 @@ interface ChatState {
   ) => void;
   /** Set the typing indicator state */
   setTyping: (isTyping: boolean) => void;
-  /** Clear all messages and start a new session */
+  /** Set the tool execution state */
+  setExecutingTools: (executing: boolean) => void;
+  /** Clear all messages (keeps sessionId for continuity) */
   clearMessages: () => void;
+  /** Start a fresh session (clears messages and sessionId) */
+  startNewSession: () => void;
   /** Set the current session ID */
   setSessionId: (sessionId: string) => void;
   /** Update a tool call's status */
   updateToolCallStatus: (toolCallId: string, status: ToolCallStatus) => void;
+  /** Update a tool call's status and store its result */
+  setToolCallResult: (toolCallId: string, status: ToolCallStatus, result?: unknown, error?: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   isTyping: false,
+  isExecutingTools: false,
   sessionId: null,
 
   addMessage: (message) =>
@@ -77,7 +86,14 @@ export const useChatStore = create<ChatState>((set) => ({
 
   setTyping: (isTyping) => set({ isTyping }),
 
+  setExecutingTools: (executing) => set({ isExecutingTools: executing }),
+
   clearMessages: () =>
+    set({
+      messages: [],
+    }),
+
+  startNewSession: () =>
     set({
       messages: [],
       sessionId: null,
@@ -94,6 +110,23 @@ export const useChatStore = create<ChatState>((set) => ({
 
         const updatedToolCalls = message.toolCalls.map((tc) =>
           tc.id === toolCallId ? { ...tc, status } : tc
+        );
+
+        return { ...message, toolCalls: updatedToolCalls };
+      });
+
+      return { messages };
+    }),
+
+  setToolCallResult: (toolCallId, status, result, error) =>
+    set((state) => {
+      const messages = state.messages.map((message) => {
+        if (message.role !== 'assistant' || !message.toolCalls) {
+          return message;
+        }
+
+        const updatedToolCalls = message.toolCalls.map((tc) =>
+          tc.id === toolCallId ? { ...tc, status, result, error } : tc
         );
 
         return { ...message, toolCalls: updatedToolCalls };

@@ -67,8 +67,23 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   // Excel Read Tools
   createToolDef(
     'read_range',
-    'Read values from a specific range. Use when you need data from a range other than the current selection.',
+    'Read values from a specific Excel range. Use this when the user asks about specific cells or ranges.',
     schemas.readRangeSchema
+  ),
+  createToolDef(
+    'get_selection',
+    'Get the current user selection in Excel. Use this when the user refers to "my selection" or "selected cells".',
+    schemas.getSelectionSchema
+  ),
+  createToolDef(
+    'get_sheet_names',
+    'List all worksheet names in the workbook. Use this when the user asks about available sheets.',
+    schemas.getSheetNamesSchema
+  ),
+  createToolDef(
+    'get_context',
+    'Get comprehensive Excel context including selection, sheets, and tables. Use for general understanding of the workbook.',
+    schemas.getContextSchema
   ),
 
   // Analytics Tools (no Excel modification)

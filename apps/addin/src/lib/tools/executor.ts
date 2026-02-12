@@ -11,6 +11,10 @@ import type {
   CreateSheetParams,
   AddTableParams,
   HighlightCellsParams,
+  ReadRangeParams,
+  GetSelectionParams,
+  GetSheetNamesParams,
+  GetContextParams,
   GetProfileParams,
   SelectRowsParams,
   GroupAggregateParams,
@@ -28,6 +32,10 @@ import {
 import { validateToolCall } from './validator';
 import { logToolExecution } from './audit';
 import {
+  executeReadRange,
+  executeGetSelection,
+  executeGetSheetNames,
+  executeGetContext,
   executeGetProfile,
   executeSelectRows,
   executeGroupAggregate,
@@ -136,6 +144,47 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
         }
         cellsAffected = result.cellCount;
         resultData = { address: result.address };
+        break;
+      }
+
+      // Basic Read Tools - Read-only operations
+      case 'read_range': {
+        const params = toolCall.parameters as unknown as ReadRangeParams;
+        const readResult = await executeReadRange(params);
+        if (!readResult.success) {
+          throw new Error(readResult.error || 'Failed to read range');
+        }
+        resultData = readResult.resultData ?? {};
+        break;
+      }
+
+      case 'get_selection': {
+        const params = toolCall.parameters as unknown as GetSelectionParams;
+        const selResult = await executeGetSelection(params);
+        if (!selResult.success) {
+          throw new Error(selResult.error || 'Failed to get selection');
+        }
+        resultData = selResult.resultData ?? {};
+        break;
+      }
+
+      case 'get_sheet_names': {
+        const params = toolCall.parameters as unknown as GetSheetNamesParams;
+        const sheetResult = await executeGetSheetNames(params);
+        if (!sheetResult.success) {
+          throw new Error(sheetResult.error || 'Failed to get sheet names');
+        }
+        resultData = sheetResult.resultData ?? {};
+        break;
+      }
+
+      case 'get_context': {
+        const params = toolCall.parameters as unknown as GetContextParams;
+        const ctxResult = await executeGetContext(params);
+        if (!ctxResult.success) {
+          throw new Error(ctxResult.error || 'Failed to get context');
+        }
+        resultData = ctxResult.resultData ?? {};
         break;
       }
 

@@ -1,6 +1,7 @@
 /**
  * Sheet Profile Extractor for Cellix.
  * Extracts metadata about worksheet structure for intelligent LLM context.
+ * Uses streaming statistics for large sheets to minimize memory usage.
  */
 
 import type {
@@ -13,6 +14,7 @@ import type {
   SemanticColumnType,
   SheetTableInfo,
   DataType,
+  ProfileColumnStats,
 } from '@cellix/shared';
 import { numberToColumn } from '@cellix/shared';
 import {
@@ -25,6 +27,8 @@ import {
   getSamples,
   type ColumnTable,
 } from '../data/arquero';
+import { streamLargeRange } from './chunkedReader';
+import { StreamingColumnStats } from './streamingStats';
 
 /** Default chunk size for large sheet reading */
 const DEFAULT_CHUNK_SIZE = 5000;
@@ -32,9 +36,24 @@ const DEFAULT_CHUNK_SIZE = 5000;
 /** Maximum rows to process for profile (beyond this, sample) */
 const MAX_PROFILE_ROWS = 50000;
 
+/** Threshold for using streaming mode (rows) */
+const STREAMING_THRESHOLD = 10000;
+
+/** Sheet metadata result types */
+type EmptySheetMetadata = { sheetName: string; isEmpty: true };
+type PopulatedSheetMetadata = {
+  sheetName: string;
+  isEmpty: false;
+  usedRange: string;
+  rowCount: number;
+  columnCount: number;
+};
+type SheetMetadata = EmptySheetMetadata | PopulatedSheetMetadata;
+
 /**
  * Extract a full profile for a worksheet.
- * For large sheets, reads in chunks to avoid timeout.
+ * For large sheets (>10K rows), uses streaming statistics to minimize memory.
+ * For smaller sheets, loads all data for full analysis.
  */
 export async function extractSheetProfile(
   sheetName?: string,
@@ -42,8 +61,8 @@ export async function extractSheetProfile(
 ): Promise<SheetProfile> {
   const { chunkSize = DEFAULT_CHUNK_SIZE, onProgress, abortSignal } = options;
 
-  return Excel.run(async (context) => {
-    // Get sheet
+  // First pass: get sheet metadata
+  const metadata: SheetMetadata = await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
       : context.workbook.worksheets.getActiveWorksheet();
@@ -54,27 +73,62 @@ export async function extractSheetProfile(
 
     await context.sync();
 
-    // Check for cancellation
     if (abortSignal?.aborted) {
       throw new Error('Profile extraction cancelled');
     }
 
-    // Handle empty sheet
     if (usedRange.isNullObject) {
-      return {
-        sheetName: sheet.name,
-        usedRange: '',
-        rowCount: 0,
-        columnCount: 0,
-        columns: [],
-        tables: [],
-        extractedAt: Date.now(),
-        version: 1,
-      };
+      return { sheetName: sheet.name, isEmpty: true as const };
     }
 
-    const totalRows = usedRange.rowCount;
-    const totalCols = usedRange.columnCount;
+    const rangeAddress = usedRange.address.includes('!')
+      ? usedRange.address.split('!')[1]
+      : usedRange.address;
+
+    return {
+      sheetName: sheet.name,
+      isEmpty: false as const,
+      usedRange: rangeAddress,
+      rowCount: usedRange.rowCount,
+      columnCount: usedRange.columnCount,
+    };
+  });
+
+  // Handle empty sheet
+  if (metadata.isEmpty) {
+    return {
+      sheetName: metadata.sheetName,
+      usedRange: '',
+      rowCount: 0,
+      columnCount: 0,
+      columns: [],
+      tables: [],
+      extractedAt: Date.now(),
+      version: 1,
+    };
+  }
+
+  // TypeScript now knows metadata is PopulatedSheetMetadata
+  const { rowCount: totalRows, columnCount: totalCols, usedRange: rangeAddress } = metadata;
+
+  // For large sheets, use streaming extraction
+  if (totalRows > STREAMING_THRESHOLD) {
+    return extractProfileWithStreaming(
+      metadata.sheetName,
+      totalRows,
+      totalCols,
+      rangeAddress,
+      options
+    );
+  }
+
+  // For smaller sheets, use the original approach
+  return Excel.run(async (context) => {
+    const sheet = sheetName
+      ? context.workbook.worksheets.getItem(sheetName)
+      : context.workbook.worksheets.getActiveWorksheet();
+
+    const usedRange = sheet.getUsedRangeOrNullObject();
 
     // For small sheets, read all at once
     let values: unknown[][];
@@ -84,7 +138,7 @@ export async function extractSheetProfile(
       values = usedRange.values;
       onProgress?.(1);
     } else {
-      // For large sheets, read in chunks
+      // For medium sheets, read in chunks
       values = await readChunked(sheet, totalRows, totalCols, chunkSize, onProgress, abortSignal);
     }
 
@@ -101,13 +155,8 @@ export async function extractSheetProfile(
     // Build column profiles
     const columns = buildColumnProfiles(cappedValues, headers);
 
-    // Parse address to remove sheet name prefix
-    const rangeAddress = usedRange.address.includes('!')
-      ? usedRange.address.split('!')[1]
-      : usedRange.address;
-
     return {
-      sheetName: sheet.name,
+      sheetName: metadata.sheetName,
       usedRange: rangeAddress,
       rowCount: totalRows,
       columnCount: totalCols,
@@ -396,4 +445,178 @@ function inferColumnSemantic(header: string | null, samples: unknown[]): Semanti
   if (/\d{4}[-/]\d{2}[-/]\d{2}/.test(sampleStr)) return 'date';
 
   return 'unknown';
+}
+
+/**
+ * Extract profile using streaming for large sheets.
+ * Uses StreamingColumnStats to minimize memory usage.
+ * Computes statistics incrementally as data is read.
+ */
+async function extractProfileWithStreaming(
+  sheetName: string,
+  totalRows: number,
+  totalCols: number,
+  usedRange: string,
+  options: ProfileExtractionOptions = {}
+): Promise<SheetProfile> {
+  const { chunkSize = DEFAULT_CHUNK_SIZE, onProgress, abortSignal } = options;
+
+  // First, read just the headers
+  let headers: string[] = [];
+  let tables: SheetTableInfo[] = [];
+
+  await Excel.run(async (context) => {
+    const sheet = context.workbook.worksheets.getItem(sheetName);
+
+    // Get headers (first row)
+    const headerRange = sheet.getRangeByIndexes(0, 0, 1, totalCols);
+    headerRange.load('values');
+    await context.sync();
+
+    headers = headerRange.values[0].map((h) => String(h ?? ''));
+
+    // Get table info
+    tables = await extractTableInfo(sheet, context);
+  });
+
+  // Check for cancellation
+  if (abortSignal?.aborted) {
+    throw new Error('Profile extraction cancelled');
+  }
+
+  // Create streaming stats for each column
+  const columnStreamingStats = headers.map(() => new StreamingColumnStats());
+  const columnSamples: unknown[][] = headers.map(() => []);
+  const columnTypeCounts: Map<DataType, number>[] = headers.map(() => new Map());
+
+  // Track how many data rows we've processed
+  let processedRows = 0;
+  let isFirstChunk = true;
+
+  // Stream through the data
+  for await (const chunk of streamLargeRange(sheetName, undefined, {
+    chunkSize,
+    onProgress,
+    abortSignal,
+  })) {
+    // Skip header row in first chunk
+    const dataChunk = isFirstChunk ? chunk.slice(1) : chunk;
+    isFirstChunk = false;
+
+    // Process each row
+    for (const row of dataChunk) {
+      processedRows++;
+
+      // Only process up to MAX_PROFILE_ROWS for statistics
+      if (processedRows > MAX_PROFILE_ROWS) {
+        continue;
+      }
+
+      // Update stats for each column
+      row.forEach((value, colIndex) => {
+        if (colIndex >= columnStreamingStats.length) return;
+
+        // Add to streaming stats
+        columnStreamingStats[colIndex].add(value);
+
+        // Collect samples (first 3 non-empty)
+        if (value != null && value !== '' && columnSamples[colIndex].length < 3) {
+          columnSamples[colIndex].push(value);
+        }
+
+        // Track types for data type detection
+        if (value != null && value !== '') {
+          const type = classifyValue(value);
+          const counts = columnTypeCounts[colIndex];
+          counts.set(type, (counts.get(type) || 0) + 1);
+        }
+      });
+    }
+  }
+
+  // Build column profiles from streaming stats
+  const columns: ColumnProfile[] = headers.map((header, index) => {
+    const streaming = columnStreamingStats[index];
+    const summary = streaming.getSummary();
+    const typeCounts = columnTypeCounts[index];
+    const samples = columnSamples[index];
+
+    // Determine data type from type counts
+    const dataType = determineDataTypeFromCounts(typeCounts);
+
+    // Convert streaming stats to ProfileColumnStats format
+    const stats: ProfileColumnStats | null = summary.isNumeric
+      ? {
+          sum: summary.stats.sum,
+          avg: summary.stats.mean,
+          min: summary.stats.min,
+          max: summary.stats.max,
+          count: summary.stats.count,
+          stdev: summary.stats.stdev,
+        }
+      : null;
+
+    // Detect mixed types
+    const hasMixedTypes = typeCounts.size > 1;
+
+    const quality: QualitySignals = {
+      hasDuplicates: summary.uniqueCount < processedRows,
+      hasMixedTypes,
+      hasOutliers: summary.hasOutliers,
+      completeness: summary.completeness,
+    };
+
+    return {
+      index,
+      letter: numberToColumn(index + 1),
+      header: header || null,
+      inferredName: inferColumnSemantic(header, samples),
+      dataType,
+      stats,
+      samples,
+      uniqueCount: summary.uniqueCount,
+      nullCount: summary.nullCount,
+      quality,
+    };
+  });
+
+  return {
+    sheetName,
+    usedRange,
+    rowCount: totalRows,
+    columnCount: totalCols,
+    columns,
+    tables,
+    extractedAt: Date.now(),
+    version: 1,
+  };
+}
+
+/**
+ * Determine data type from type counts.
+ */
+function determineDataTypeFromCounts(typeCounts: Map<DataType, number>): DataType {
+  if (typeCounts.size === 0) {
+    return 'empty';
+  }
+
+  // Find dominant type
+  let maxType: DataType = 'text';
+  let maxCount = 0;
+  let totalCount = 0;
+
+  for (const [type, count] of typeCounts) {
+    totalCount += count;
+    if (count > maxCount) {
+      maxCount = count;
+      maxType = type;
+    }
+  }
+
+  // If >80% are same type, use that
+  if (maxCount / totalCount >= 0.8) {
+    return maxType;
+  }
+
+  return 'mixed';
 }

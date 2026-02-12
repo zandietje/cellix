@@ -127,6 +127,28 @@ export type SemanticColumnType =
   | 'text'
   | 'unknown';
 
+/**
+ * Progressive profiling levels.
+ * Higher levels include all data from lower levels.
+ */
+export type ProfilingLevel =
+  /** Level 0: Sheet names + used ranges (instant) */
+  | 'inventory'
+  /** Level 1: + Headers + row counts (on sheet focus) */
+  | 'headers'
+  /** Level 2: + Column types + basic stats (on first question) */
+  | 'types'
+  /** Level 3: + Relationships + quality signals (on complex questions) */
+  | 'full';
+
+/** Numeric values for profiling level comparison */
+export const PROFILING_LEVEL_ORDER: Record<ProfilingLevel, number> = {
+  inventory: 0,
+  headers: 1,
+  types: 2,
+  full: 3,
+};
+
 /** Cache entry for a sheet profile */
 export interface ProfileCacheEntry {
   /** The cached profile */
@@ -137,6 +159,8 @@ export interface ProfileCacheEntry {
   version: number;
   /** When cached */
   cachedAt: number;
+  /** Profiling level of this cached entry */
+  level: ProfilingLevel;
 }
 
 /** Profile extraction options */

@@ -1,9 +1,16 @@
 /**
  * Profile Cache for Cellix.
  * In-memory cache with localStorage persistence for sheet profiles.
+ * Supports progressive profiling levels for efficient data loading.
  */
 
-import type { SheetProfile, ProfileCacheEntry, WorkbookInventory } from '@cellix/shared';
+import type {
+  SheetProfile,
+  ProfileCacheEntry,
+  WorkbookInventory,
+  ProfilingLevel,
+} from '@cellix/shared';
+import { PROFILING_LEVEL_ORDER } from '@cellix/shared';
 
 /** localStorage key for profile cache */
 const STORAGE_KEY = 'cellix_profile_cache';
@@ -44,14 +51,17 @@ export function getCachedProfile(sheetName: string): SheetProfile | null {
 }
 
 /**
- * Store profile in cache.
+ * Store profile in cache at a specific level.
+ * @param profile - The profile to cache
+ * @param level - The profiling level (default: 'full')
  */
-export function setCachedProfile(profile: SheetProfile): void {
+export function setCachedProfile(profile: SheetProfile, level: ProfilingLevel = 'full'): void {
   const entry: ProfileCacheEntry = {
     profile,
     sheetName: profile.sheetName,
     version: profile.version,
     cachedAt: Date.now(),
+    level,
   };
 
   // Update memory cache
@@ -158,4 +168,93 @@ export function getCacheStats(): {
     storageEntries: Object.keys(stored).length,
     hasInventory: inventoryCache !== null,
   };
+}
+
+/**
+ * Get profile at minimum required level, or null if not available.
+ * Returns cached profile only if it meets the minimum level requirement.
+ *
+ * @param sheetName - Sheet to get profile for
+ * @param minLevel - Minimum profiling level required
+ * @returns Profile if available at required level, null otherwise
+ */
+export function getCachedProfileAtLevel(
+  sheetName: string,
+  minLevel: ProfilingLevel
+): SheetProfile | null {
+  // Check memory cache first
+  const entry = memoryCache.get(sheetName);
+  if (entry && !isStale(entry.cachedAt)) {
+    const entryLevel = entry.level ?? 'full'; // Backwards compatibility
+    if (PROFILING_LEVEL_ORDER[entryLevel] >= PROFILING_LEVEL_ORDER[minLevel]) {
+      return entry.profile;
+    }
+  }
+
+  // Check localStorage
+  const stored = loadFromStorage();
+  const storedEntry = stored[sheetName];
+  if (storedEntry && !isStale(storedEntry.cachedAt)) {
+    const entryLevel = storedEntry.level ?? 'full'; // Backwards compatibility
+    if (PROFILING_LEVEL_ORDER[entryLevel] >= PROFILING_LEVEL_ORDER[minLevel]) {
+      // Hydrate memory cache
+      memoryCache.set(sheetName, storedEntry);
+      return storedEntry.profile;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Check if profile needs upgrade to a higher level.
+ *
+ * @param sheetName - Sheet to check
+ * @param requiredLevel - The level needed
+ * @returns true if profile doesn't exist or is at a lower level
+ */
+export function needsLevelUpgrade(
+  sheetName: string,
+  requiredLevel: ProfilingLevel
+): boolean {
+  // Check memory cache first
+  const entry = memoryCache.get(sheetName);
+  if (entry && !isStale(entry.cachedAt)) {
+    const entryLevel = entry.level ?? 'full';
+    return PROFILING_LEVEL_ORDER[entryLevel] < PROFILING_LEVEL_ORDER[requiredLevel];
+  }
+
+  // Check localStorage
+  const stored = loadFromStorage();
+  const storedEntry = stored[sheetName];
+  if (storedEntry && !isStale(storedEntry.cachedAt)) {
+    const entryLevel = storedEntry.level ?? 'full';
+    return PROFILING_LEVEL_ORDER[entryLevel] < PROFILING_LEVEL_ORDER[requiredLevel];
+  }
+
+  // No cached entry, definitely needs upgrade
+  return true;
+}
+
+/**
+ * Get the current profiling level for a sheet.
+ *
+ * @param sheetName - Sheet to check
+ * @returns Current profiling level or null if not cached
+ */
+export function getCachedLevel(sheetName: string): ProfilingLevel | null {
+  // Check memory cache first
+  const entry = memoryCache.get(sheetName);
+  if (entry && !isStale(entry.cachedAt)) {
+    return entry.level ?? 'full';
+  }
+
+  // Check localStorage
+  const stored = loadFromStorage();
+  const storedEntry = stored[sheetName];
+  if (storedEntry && !isStale(storedEntry.cachedAt)) {
+    return storedEntry.level ?? 'full';
+  }
+
+  return null;
 }

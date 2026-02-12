@@ -18,7 +18,9 @@ import {
   Eye24Regular,
   Warning24Regular,
 } from '@fluentui/react-icons';
+import { isWriteTool } from '@cellix/shared';
 import type { ToolCall, ToolCallStatus } from '@cellix/shared';
+import { ToolResultDisplay } from './ToolResultDisplay';
 
 const useStyles = makeStyles({
   container: {
@@ -97,7 +99,7 @@ const statusConfig: Record<
 export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const styles = useStyles();
 
-  const { name, parameters, status, error } = toolCall;
+  const { name, parameters, status, error, result } = toolCall;
   const config = statusConfig[status];
 
   // Format tool name for display
@@ -136,6 +138,31 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
       parts.push(`color: ${params.color}`);
     }
 
+    // Read tool parameters
+    if (params.columns && Array.isArray(params.columns)) {
+      parts.push(`columns: ${(params.columns as string[]).join(', ')}`);
+    }
+
+    if (params.groupBy && Array.isArray(params.groupBy)) {
+      parts.push(`group by: ${(params.groupBy as string[]).join(', ')}`);
+    }
+
+    if (params.column && typeof params.column === 'string' && !params.columns) {
+      parts.push(`column: ${params.column}`);
+    }
+
+    if (params.query && typeof params.query === 'string') {
+      parts.push(`query: "${params.query}"`);
+    }
+
+    if (params.sheet && typeof params.sheet === 'string') {
+      parts.push(`sheet: ${params.sheet}`);
+    }
+
+    if (params.method && typeof params.method === 'string') {
+      parts.push(`method: ${params.method}`);
+    }
+
     return parts.join(' | ') || 'No parameters';
   };
 
@@ -163,6 +190,9 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
           >
             {error}
           </Text>
+        )}
+        {status === 'executed' && result != null && !isWriteTool(name) && (
+          <ToolResultDisplay toolName={name} result={result} />
         )}
       </div>
     </div>

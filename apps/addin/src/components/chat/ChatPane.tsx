@@ -7,9 +7,13 @@ import { TypingIndicator } from './TypingIndicator';
 import { useChatStore } from '@/store/chatStore';
 import { useExcelStore } from '@/store/excelStore';
 import { usePreviewStore } from '@/store/previewStore';
-import { streamChat } from '@/lib/api';
-import { generatePreview, isWriteTool } from '@/lib/tools';
-import type { ToolCall } from '@cellix/shared';
+import { streamChat, continueChat } from '@/lib/api';
+import type { ToolResult, HistoryMessage } from '@/lib/api';
+import { generatePreview, executeToolCall, isWriteTool, isReadTool } from '@/lib/tools';
+import type { ToolCall, ChatStreamEvent } from '@cellix/shared';
+
+/** Maximum number of tool execution + continuation iterations to prevent infinite loops */
+const MAX_CONTINUATION_ITERATIONS = 3;
 
 const useStyles = makeStyles({
   container: {
@@ -46,7 +50,18 @@ const useStyles = makeStyles({
 
 export function ChatPane() {
   const styles = useStyles();
-  const { messages, isTyping, addMessage, updateLastAssistantMessage, setTyping, updateToolCallStatus } = useChatStore();
+  const {
+    messages,
+    isTyping,
+    sessionId,
+    addMessage,
+    updateLastAssistantMessage,
+    setTyping,
+    setExecutingTools,
+    setSessionId,
+    updateToolCallStatus,
+    setToolCallResult,
+  } = useChatStore();
   const { context: excelContext } = useExcelStore();
   const { addPendingAction } = usePreviewStore();
 
@@ -54,54 +69,25 @@ export function ChatPane() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const lastMessageRef = useRef<string | null>(null);
 
-  // Process tool calls and generate previews
-  const processToolCalls = useCallback(
-    async (toolCalls: Array<{ id: string; name: string; arguments: string }>) => {
-      for (const tc of toolCalls) {
-        // Only process write tools
-        if (!isWriteTool(tc.name)) continue;
-
-        try {
-          // Parse parameters
-          let parameters: Record<string, unknown> = {};
-          try {
-            parameters = JSON.parse(tc.arguments || '{}');
-          } catch {
-            // Keep empty object if parse fails
-          }
-
-          const toolCall: ToolCall = {
-            id: tc.id,
-            name: tc.name,
-            parameters,
-            status: 'pending',
-          };
-
-          // Generate preview and add to store
-          const preview = await generatePreview(toolCall);
-          addPendingAction(preview);
-
-          // Update chat store status based on validation result
-          if (!preview.validation.valid) {
-            updateToolCallStatus(tc.id, 'error');
-          }
-        } catch (err) {
-          console.error(`[ChatPane] Failed to generate preview for ${tc.name}:`, err);
-          // Update status to error when preview generation fails
-          updateToolCallStatus(tc.id, 'error');
-        }
-      }
-    },
-    [addPendingAction, updateToolCallStatus]
-  );
-
-  const processStream = useCallback(
-    async (content: string) => {
+  /**
+   * Consume events from an SSE stream, updating the last assistant message.
+   * Works identically for both initial chat and continuation streams.
+   * Returns the collected text content and tool calls.
+   */
+  const consumeStream = useCallback(
+    async (stream: AsyncGenerator<ChatStreamEvent, void, unknown>) => {
       let fullContent = '';
       const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
 
-      for await (const event of streamChat(content, excelContext)) {
+      for await (const event of stream) {
         switch (event.type) {
+          case 'session':
+            // Store session ID from backend for conversation continuity
+            if (event.sessionId) {
+              setSessionId(event.sessionId);
+            }
+            break;
+
           case 'text':
             if (event.content) {
               fullContent += event.content;
@@ -112,9 +98,9 @@ export function ChatPane() {
           case 'tool_call_start':
           case 'tool_call_delta':
             if (event.toolCall) {
-              const existingIndex = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
-              if (existingIndex >= 0) {
-                toolCalls[existingIndex] = {
+              const idx = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
+              if (idx >= 0) {
+                toolCalls[idx] = {
                   id: event.toolCall.id,
                   name: event.toolCall.name,
                   arguments: event.toolCall.arguments,
@@ -132,9 +118,9 @@ export function ChatPane() {
 
           case 'tool_call_end':
             if (event.toolCall) {
-              const existingIndex = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
-              if (existingIndex >= 0) {
-                toolCalls[existingIndex] = {
+              const idx = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
+              if (idx >= 0) {
+                toolCalls[idx] = {
                   id: event.toolCall.id,
                   name: event.toolCall.name,
                   arguments: event.toolCall.arguments,
@@ -151,21 +137,169 @@ export function ChatPane() {
             break;
 
           case 'error':
-            // AI service error - show in message
             fullContent += `\n\n*Error: ${event.error}*`;
             updateLastAssistantMessage(fullContent, toolCalls);
             break;
 
           case 'done':
-            // Process any pending tool calls when stream completes
-            if (toolCalls.length > 0) {
-              await processToolCalls(toolCalls);
-            }
             break;
         }
       }
+
+      return { content: fullContent, toolCalls };
     },
-    [excelContext, updateLastAssistantMessage, processToolCalls]
+    [updateLastAssistantMessage, setSessionId]
+  );
+
+  /**
+   * Execute tool calls and collect results for the feedback loop.
+   * - Read tools: Execute immediately, collect ToolResult[] for continuation
+   * - Write tools: Generate preview for user approval (not sent back to AI)
+   */
+  const executeAndCollectResults = useCallback(
+    async (toolCalls: Array<{ id: string; name: string; arguments: string }>) => {
+      const readResults: ToolResult[] = [];
+      let hasWriteTools = false;
+
+      for (const tc of toolCalls) {
+        try {
+          let parameters: Record<string, unknown> = {};
+          try {
+            parameters = JSON.parse(tc.arguments || '{}');
+          } catch {
+            // Keep empty object if parse fails
+          }
+
+          const toolCall: ToolCall = {
+            id: tc.id,
+            name: tc.name,
+            parameters,
+            status: 'pending',
+          };
+
+          if (isWriteTool(tc.name)) {
+            hasWriteTools = true;
+            const preview = await generatePreview(toolCall);
+            addPendingAction(preview);
+            if (!preview.validation.valid) {
+              updateToolCallStatus(tc.id, 'error');
+            }
+          } else if (isReadTool(tc.name)) {
+            // Read tools: Execute and collect result for AI continuation
+            const result = await executeToolCall(toolCall);
+            if (result.success) {
+              setToolCallResult(tc.id, 'executed', result.resultData);
+              readResults.push({
+                toolCallId: tc.id,
+                toolName: tc.name,
+                result: result.resultData,
+              });
+            } else {
+              setToolCallResult(tc.id, 'error', undefined, result.error);
+              readResults.push({
+                toolCallId: tc.id,
+                toolName: tc.name,
+                result: result.error || 'Execution failed',
+                isError: true,
+              });
+            }
+          }
+          // Analytics tools: No execution needed (text-only reasoning by AI)
+        } catch (err) {
+          console.error(`[ChatPane] Failed to process tool ${tc.name}:`, err);
+          const errorMsg = err instanceof Error ? err.message : 'Tool execution failed';
+          setToolCallResult(tc.id, 'error', undefined, errorMsg);
+          readResults.push({
+            toolCallId: tc.id,
+            toolName: tc.name,
+            result: errorMsg,
+            isError: true,
+          });
+        }
+      }
+
+      return { readResults, hasWriteTools };
+    },
+    [addPendingAction, updateToolCallStatus, setToolCallResult]
+  );
+
+  /**
+   * Build conversation history from current messages for the backend.
+   * Extracts user/assistant text messages, excluding the current message being sent.
+   * Limited to last 20 messages to stay within token budget.
+   */
+  const buildHistory = useCallback((): HistoryMessage[] => {
+    const history: HistoryMessage[] = [];
+    for (const msg of messages) {
+      if ((msg.role === 'user' || msg.role === 'assistant') && msg.content) {
+        history.push({ role: msg.role, content: msg.content });
+      }
+    }
+    // Keep last 20 messages (will be further trimmed by backend token budget)
+    return history.slice(-20);
+  }, [messages]);
+
+  /**
+   * Main stream processor with tool result feedback loop.
+   *
+   * Flow:
+   * 1. Stream initial AI response
+   * 2. If AI requests tool calls:
+   *    a. Execute read tools immediately, generate previews for write tools
+   *    b. Send read tool results back to AI via /api/chat/continue
+   *    c. Stream the AI's analysis response
+   *    d. If AI requests more tools, repeat (up to MAX_CONTINUATION_ITERATIONS)
+   * 3. Display final response
+   */
+  const processStream = useCallback(
+    async (userMessage: string) => {
+      // Build history from existing messages (before the current user message was added)
+      const history = buildHistory();
+
+      // Stage 1: Stream initial AI response (with session and history)
+      const initial = await consumeStream(streamChat(userMessage, excelContext, sessionId, history));
+
+      // Stage 2: Tool execution + continuation loop
+      let currentContent = initial.content;
+      let currentToolCalls = initial.toolCalls;
+      let iteration = 0;
+
+      while (currentToolCalls.length > 0 && iteration < MAX_CONTINUATION_ITERATIONS) {
+        iteration++;
+
+        // Execute tools and collect read results
+        setExecutingTools(true);
+        const { readResults, hasWriteTools } = await executeAndCollectResults(currentToolCalls);
+        setExecutingTools(false);
+
+        // Stop the loop if:
+        // - Write tools are present (need user approval first)
+        // - No read results to send back to AI
+        if (hasWriteTools || readResults.length === 0) break;
+
+        // Add new assistant message placeholder for the continuation response
+        addMessage({ role: 'assistant', content: '' });
+
+        // Send tool results back to AI and stream the continuation
+        const isFinalIteration = iteration >= MAX_CONTINUATION_ITERATIONS;
+        const continuation = await consumeStream(
+          continueChat({
+            message: userMessage,
+            sessionId,
+            history,
+            excelContext,
+            assistantContent: currentContent || null,
+            toolCalls: currentToolCalls,
+            toolResults: readResults,
+            allowTools: !isFinalIteration,
+          })
+        );
+
+        currentContent = continuation.content;
+        currentToolCalls = continuation.toolCalls;
+      }
+    },
+    [excelContext, sessionId, buildHistory, consumeStream, executeAndCollectResults, addMessage, setExecutingTools]
   );
 
   const handleSend = useCallback(
@@ -192,9 +326,10 @@ export function ChatPane() {
         updateLastAssistantMessage('*Connection error. See error message above.*', []);
       } finally {
         setTyping(false);
+        setExecutingTools(false);
       }
     },
-    [addMessage, setTyping, processStream, updateLastAssistantMessage]
+    [addMessage, setTyping, setExecutingTools, processStream, updateLastAssistantMessage]
   );
 
   const handleRetry = useCallback(async () => {
@@ -216,8 +351,9 @@ export function ChatPane() {
       updateLastAssistantMessage('*Connection error. See error message above.*', []);
     } finally {
       setTyping(false);
+      setExecutingTools(false);
     }
-  }, [processStream, setTyping, updateLastAssistantMessage]);
+  }, [processStream, setTyping, setExecutingTools, updateLastAssistantMessage]);
 
   const handleDismissError = useCallback(() => {
     setStreamError(null);

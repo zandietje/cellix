@@ -12,6 +12,7 @@ An AI chat assistant that can:
 - All with robust safety controls (cell limits, validation, audit logging)
 
 ### Full Vision (Post-MVP)
+- Sheet Intelligence: Profile-based understanding of large Excel files
 - RAG-powered domain knowledge retrieval
 - Direct Shopee/Lazada API integration
 - Anomaly detection and proactive alerts
@@ -33,7 +34,8 @@ An AI chat assistant that can:
 | State Management | Zustand | ✅ |
 | UI Components | Fluent UI React v9 | ✅ |
 | HTTP Client | Axios | ✅ |
-| Real-time | Socket.io Client | ❌ Phase 7+ |
+| Data Processing | Arquero (~105KB) | ❌ Phase 5 |
+| Real-time | Socket.io Client | ❌ Phase 8+ |
 
 ### Backend
 | Component | Technology | MVP |
@@ -41,9 +43,9 @@ An AI chat assistant that can:
 | Runtime | Node.js 20 LTS | ✅ |
 | Framework | Fastify | ✅ |
 | AI Provider | OpenAI (+ Claude API ready) | ✅ |
-| Embeddings | text-embedding-3-small | ❌ Phase 5+ |
-| Vector DB | Supabase pgvector | ❌ Phase 5+ |
-| Queue | Bull + Redis | ❌ Phase 9+ |
+| Embeddings | text-embedding-3-small | ❌ Phase 6+ |
+| Vector DB | Supabase pgvector | ❌ Phase 6+ |
+| Queue | Bull + Redis | ❌ Phase 10+ |
 | Validation | Zod | ✅ |
 | Auth | Supabase Auth | ✅ |
 
@@ -52,8 +54,8 @@ An AI chat assistant that can:
 |-----------|------------|-----|
 | Hosting | Vercel (add-in) + Railway/Render (backend) | ✅ |
 | Database | Supabase (Postgres) | ✅ |
-| Cache | Redis (Upstash) | ❌ Phase 5+ |
-| Monitoring | Sentry | ❌ Phase 12 |
+| Cache | Redis (Upstash) | ❌ Phase 6+ |
+| Monitoring | Sentry | ❌ Phase 13 |
 
 > **Note:** Items marked ❌ are deferred from MVP. Install only when needed.
 
@@ -169,19 +171,20 @@ cellix/
 | 4 | Tool Execution | Validation, preview system, safety controls | 4 |
 | - | Testing & Polish | Sideload testing, bug fixes, AppSource prep | 5-6 |
 
-### Post-MVP (Phases 5-12) - After validation
+### Post-MVP (Phases 5-13) - After validation
 | Phase | Name | Focus | Priority |
 |-------|------|-------|----------|
-| 5 | RAG Knowledge | Vector embeddings, knowledge retrieval | High |
-| 6 | Data Connectors | Shopee/Lazada OAuth and APIs | High |
-| 7 | Anomaly Detection | Metric monitors, alert system | Medium |
-| 8 | Comparison Intelligence | Cross-platform/period comparisons | Medium |
-| 9 | Report Generation | Automated Excel reports | Medium |
-| 10 | Template Library | Pre-built analytics templates | Low |
-| 11 | Notifications | Slack, Teams, Email integrations | Low |
-| 12 | Polish & Production | Error handling, AppSource submission | High |
+| 5 | Sheet Intelligence | Profile system, smart retrieval, large file support | High |
+| 6 | RAG Knowledge | Vector embeddings, knowledge retrieval | High |
+| 7 | Data Connectors | Shopee/Lazada OAuth and APIs | High |
+| 8 | Anomaly Detection | Metric monitors, alert system | Medium |
+| 9 | Comparison Intelligence | Cross-platform/period comparisons | Medium |
+| 10 | Report Generation | Automated Excel reports | Medium |
+| 11 | Template Library | Pre-built analytics templates | Low |
+| 12 | Notifications | Slack, Teams, Email integrations | Low |
+| 13 | Polish & Production | Error handling, AppSource submission | High |
 
-> **Current Phase:** Pre-Phase 1 (Project setup)
+> **Current Phase:** Phase 4 Complete (Tool Execution)
 >
 > **MVP Strategy:** Ship Phases 1-4 first to validate product-market fit. Defer RAG (use hardcoded system prompt), data connectors (users paste data), and other features until core value is proven.
 
@@ -304,10 +307,10 @@ const TOKEN_LIMITS = {
 - `audit_log` - Tool execution audit trail
 
 ### Post-MVP Tables
-- `platform_connections` - Shopee/Lazada OAuth tokens (Phase 6)
-- `knowledge_chunks` - RAG embeddings with pgvector (Phase 5)
-- `alerts` - Anomaly alerts (Phase 7)
-- `templates` - Report/sheet templates (Phase 10)
+- `platform_connections` - Shopee/Lazada OAuth tokens (Phase 7)
+- `knowledge_chunks` - RAG embeddings with pgvector (Phase 6)
+- `alerts` - Anomaly alerts (Phase 8)
+- `templates` - Report/sheet templates (Phase 11)
 
 > See `FEATURE_PLAN.md` for full schema definitions.
 
@@ -437,6 +440,7 @@ pnpm build:addin   # Build add-in only
 - `openai` - AI provider
 - `zod` - Validation
 - `fastify` - Backend framework
+- `arquero` - Data processing (Phase 5) - filter, aggregate, outlier detection
 
 ### Useful Commands
 | Command | Description |
