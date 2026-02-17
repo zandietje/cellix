@@ -30,11 +30,20 @@ const useStyles = makeStyles({
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
   },
-  timestamp: {
-    display: 'block',
-    fontSize: tokens.fontSizeBase100,
+  footer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalXS,
+  },
+  timestamp: {
+    fontSize: tokens.fontSizeBase100,
     opacity: 0.7,
+  },
+  tierBadge: {
+    fontSize: tokens.fontSizeBase100,
+    opacity: 0.6,
   },
   toolCalls: {
     marginTop: tokens.spacingVerticalS,
@@ -68,6 +77,13 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
   const hasToolCalls = message.toolCalls && message.toolCalls.length > 0;
 
+  const tierLabel: Record<string, string> = {
+    simple: 'Nano',
+    standard: 'Mini',
+    complex: 'Pro',
+    reasoning: 'Reasoning',
+  };
+
   return (
     <div className={containerClass}>
       <div className={bubbleClass}>
@@ -81,7 +97,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           </div>
         )}
 
-        <Text className={styles.timestamp}>{formatTime(message.timestamp)}</Text>
+        <div className={styles.footer}>
+          <Text className={styles.timestamp}>{formatTime(message.timestamp)}</Text>
+          {!isUser && message.tier && (
+            <Text className={styles.tierBadge}>
+              {tierLabel[message.tier] || message.tier}
+            </Text>
+          )}
+        </div>
       </div>
     </div>
   );

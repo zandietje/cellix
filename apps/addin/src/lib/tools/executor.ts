@@ -21,6 +21,7 @@ import type {
   FindOutliersParams,
   SearchValuesParams,
 } from '@cellix/shared';
+import { getParams } from './types';
 import {
   writeRange,
   setFormula,
@@ -82,7 +83,7 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
     // Dispatch to specific executor based on tool name
     switch (toolCall.name) {
       case 'write_range': {
-        const params = toolCall.parameters as unknown as WriteRangeParams;
+        const params = getParams<WriteRangeParams>(toolCall);
         const result = await writeRange(params.address, params.values);
         if (!result.success) {
           throw new Error(result.error || 'Failed to write range');
@@ -93,18 +94,18 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
       }
 
       case 'set_formula': {
-        const params = toolCall.parameters as unknown as SetFormulaParams;
+        const params = getParams<SetFormulaParams>(toolCall);
         const result = await setFormula(params.address, params.formula);
         if (!result.success) {
           throw new Error(result.error || 'Failed to set formula');
         }
-        cellsAffected = 1;
+        cellsAffected = result.cellCount;
         resultData = { address: result.address };
         break;
       }
 
       case 'format_range': {
-        const params = toolCall.parameters as unknown as FormatRangeParams;
+        const params = getParams<FormatRangeParams>(toolCall);
         const result = await formatRange(params.address, params.style);
         if (!result.success) {
           throw new Error(result.error || 'Failed to format range');
@@ -115,7 +116,7 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
       }
 
       case 'create_sheet': {
-        const params = toolCall.parameters as unknown as CreateSheetParams;
+        const params = getParams<CreateSheetParams>(toolCall);
         const result = await createSheet(params.name);
         if (!result.success) {
           throw new Error(result.error || 'Failed to create sheet');
@@ -126,7 +127,7 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
       }
 
       case 'add_table': {
-        const params = toolCall.parameters as unknown as AddTableParams;
+        const params = getParams<AddTableParams>(toolCall);
         const result = await addTable(params.address, params.name, params.hasHeaders);
         if (!result.success) {
           throw new Error(result.error || 'Failed to create table');
@@ -137,7 +138,7 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
       }
 
       case 'highlight_cells': {
-        const params = toolCall.parameters as unknown as HighlightCellsParams;
+        const params = getParams<HighlightCellsParams>(toolCall);
         const result = await highlightCells(params.address, params.color);
         if (!result.success) {
           throw new Error(result.error || 'Failed to highlight cells');
@@ -149,7 +150,7 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
 
       // Basic Read Tools - Read-only operations
       case 'read_range': {
-        const params = toolCall.parameters as unknown as ReadRangeParams;
+        const params = getParams<ReadRangeParams>(toolCall);
         const readResult = await executeReadRange(params);
         if (!readResult.success) {
           throw new Error(readResult.error || 'Failed to read range');
@@ -159,7 +160,7 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
       }
 
       case 'get_selection': {
-        const params = toolCall.parameters as unknown as GetSelectionParams;
+        const params = getParams<GetSelectionParams>(toolCall);
         const selResult = await executeGetSelection(params);
         if (!selResult.success) {
           throw new Error(selResult.error || 'Failed to get selection');
@@ -169,7 +170,7 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
       }
 
       case 'get_sheet_names': {
-        const params = toolCall.parameters as unknown as GetSheetNamesParams;
+        const params = getParams<GetSheetNamesParams>(toolCall);
         const sheetResult = await executeGetSheetNames(params);
         if (!sheetResult.success) {
           throw new Error(sheetResult.error || 'Failed to get sheet names');
@@ -179,7 +180,7 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
       }
 
       case 'get_context': {
-        const params = toolCall.parameters as unknown as GetContextParams;
+        const params = getParams<GetContextParams>(toolCall);
         const ctxResult = await executeGetContext(params);
         if (!ctxResult.success) {
           throw new Error(ctxResult.error || 'Failed to get context');
@@ -190,37 +191,43 @@ export async function executeToolCall(toolCall: ToolCall): Promise<ExecutionResu
 
       // Smart Retrieval Tools (Phase 5B) - Read-only operations
       case 'get_profile': {
-        const params = toolCall.parameters as unknown as GetProfileParams;
-        const profile = await executeGetProfile(params);
-        resultData = profile as unknown as Record<string, unknown>;
+        const profile = await executeGetProfile(getParams<GetProfileParams>(toolCall));
+        resultData = { ...profile };
         break;
       }
 
       case 'select_rows': {
-        const params = toolCall.parameters as unknown as SelectRowsParams;
-        const rows = await executeSelectRows(params);
-        resultData = rows as unknown as Record<string, unknown>;
+        const rows = await executeSelectRows(getParams<SelectRowsParams>(toolCall));
+        resultData = { ...rows };
         break;
       }
 
       case 'group_aggregate': {
-        const params = toolCall.parameters as unknown as GroupAggregateParams;
-        const groups = await executeGroupAggregate(params);
-        resultData = groups as unknown as Record<string, unknown>;
+        const groups = await executeGroupAggregate(getParams<GroupAggregateParams>(toolCall));
+        resultData = { ...groups };
         break;
       }
 
       case 'find_outliers': {
-        const params = toolCall.parameters as unknown as FindOutliersParams;
-        const outliers = await executeFindOutliers(params);
-        resultData = outliers as unknown as Record<string, unknown>;
+        const outliers = await executeFindOutliers(getParams<FindOutliersParams>(toolCall));
+        resultData = { ...outliers };
         break;
       }
 
       case 'search_values': {
-        const params = toolCall.parameters as unknown as SearchValuesParams;
-        const matches = await executeSearchValues(params);
-        resultData = matches as unknown as Record<string, unknown>;
+        const matches = await executeSearchValues(getParams<SearchValuesParams>(toolCall));
+        resultData = { ...matches };
+        break;
+      }
+
+      // Analytics tools are AI-reasoning-only — pass params back as result
+      case 'explain_kpi':
+      case 'suggest_actions': {
+        resultData = {
+          tool: toolCall.name,
+          parameters: toolCall.parameters,
+          note: 'Analytics tool executed — result is AI-generated reasoning',
+        };
         break;
       }
 

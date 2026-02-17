@@ -4,6 +4,10 @@
  */
 
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type { ChatStreamEvent, ToolCallChunk } from '@cellix/shared';
+
+// Re-export shared types for convenience
+export type { ChatStreamEvent, ToolCallChunk };
 
 /** Message type compatible with OpenAI format */
 export type Message = ChatCompletionMessageParam;
@@ -37,28 +41,8 @@ export interface ChatParams {
   temperature?: number;
   /** Control tool usage behavior */
   toolChoice?: ToolChoice;
-}
-
-/** Tool call data accumulated from stream */
-export interface ToolCallChunk {
-  /** Unique tool call ID */
-  id: string;
-  /** Name of the tool being called */
-  name: string;
-  /** JSON string of arguments (accumulated across chunks) */
-  arguments: string;
-}
-
-/** Events emitted during chat streaming */
-export interface ChatStreamEvent {
-  /** Type of event */
-  type: 'text' | 'tool_call_start' | 'tool_call_delta' | 'tool_call_end' | 'done' | 'error';
-  /** Text content (for text events) */
-  content?: string;
-  /** Tool call data (for tool_call events) */
-  toolCall?: ToolCallChunk;
-  /** Error message (for error events) */
-  error?: string;
+  /** Model override (uses env default if not specified) */
+  model?: string;
 }
 
 /** AI provider interface - implement for each provider */

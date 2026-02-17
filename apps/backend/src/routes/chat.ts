@@ -1,9 +1,10 @@
 /**
  * Chat API routes with Server-Sent Events streaming.
  *
- * Uses a two-stage AI architecture:
+ * Uses a three-stage AI architecture:
  * 1. Planner: Fast intent detection and tool selection (gpt-4o-mini)
- * 2. Executor: Forced tool execution or question answering (gpt-4o)
+ * 2. Router: Selects optimal model tier based on planner output (rule-based, free)
+ * 3. Executor: Forced tool execution or question answering (tier-selected model)
  */
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -11,14 +12,19 @@ import { z } from 'zod';
 import {
   getAIProvider,
   SYSTEM_PROMPT,
-  formatExcelContext,
-  formatProfileContext,
+  buildContextText,
+  ensurePromptFitsTokenBudget,
   planToolCall,
   isValidToolPlan,
+  classifyTier,
+  classifyContinuationTier,
+  MODEL_TIERS,
 } from '../services/ai/index.js';
-import type { ToolChoice } from '../services/ai/types.js';
-import { TOOL_DEFINITIONS } from '../services/tools/index.js';
-import { TOKEN_LIMITS, countTokens, truncateToTokenLimit } from '../lib/tokens.js';
+import type { ToolChoice, Message } from '../services/ai/types.js';
+import { TOOL_DEFINITIONS, READ_TOOL_DEFINITIONS } from '../services/tools/index.js';
+import { TOKEN_LIMITS, countTokens } from '../lib/tokens.js';
+import { setSseHeaders, writeSseEvent } from '../lib/sse.js';
+import { CHAT_CONFIG } from '../lib/constants.js';
 import {
   createSession,
   loadSessionHistory,
@@ -28,18 +34,46 @@ import {
 import type { HistoryMessage } from '../services/chat/sessionManager.js';
 import type { ExcelContextFull, ExcelContextWithProfile } from '@cellix/shared';
 
+/** Type guard: checks if a Zod-parsed context is the profile-first shape */
+function isProfileContext(ctx: unknown): ctx is ExcelContextWithProfile {
+  return !!ctx && typeof ctx === 'object' && 'profile' in ctx && 'inventory' in ctx;
+}
+
+/** Type guard: checks if a Zod-parsed context is the legacy shape */
+function isLegacyContext(ctx: unknown): ctx is ExcelContextFull {
+  return !!ctx && typeof ctx === 'object' && 'selection' in ctx && !('profile' in ctx);
+}
+
 /** Schema for a history message sent from the frontend (fallback when no DB) */
 const historyMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
   content: z.string(),
 });
 
+/** Validates either profile-first or legacy Excel context */
+const excelContextSchema = z.union([
+  // Profile-first context (Phase 5C)
+  z.object({
+    profile: z.object({ sheetName: z.string() }).passthrough(),
+    inventory: z.object({}).passthrough(),
+    selection: z.object({ address: z.string().optional() }).passthrough().optional(),
+  }),
+  // Legacy full context
+  z.object({
+    activeSheet: z.string().optional(),
+    selection: z.object({ address: z.string() }).passthrough().optional(),
+    sheets: z.array(z.string()).optional(),
+  }).passthrough(),
+]).optional();
+
 /** Request body schema */
 const chatRequestSchema = z.object({
   message: z.string().min(1, 'Message is required').max(10000, 'Message too long'),
-  sessionId: z.string().optional(),
+  sessionId: z.string()
+    .regex(/^(temp_[\w-]+|[0-9a-f-]{36})$/i, 'Invalid session ID format')
+    .optional(),
   history: z.array(historyMessageSchema).optional(),
-  excelContext: z.any().optional(), // ExcelContextFull - loosely validated
+  excelContext: excelContextSchema,
 });
 
 type ChatRequestBody = z.infer<typeof chatRequestSchema>;
@@ -47,9 +81,11 @@ type ChatRequestBody = z.infer<typeof chatRequestSchema>;
 /** Request body schema for continuation after tool execution */
 const chatContinueSchema = z.object({
   message: z.string().min(1, 'Original message is required'),
-  sessionId: z.string().optional(),
+  sessionId: z.string()
+    .regex(/^(temp_[\w-]+|[0-9a-f-]{36})$/i, 'Invalid session ID format')
+    .optional(),
   history: z.array(historyMessageSchema).optional(),
-  excelContext: z.any().optional(),
+  excelContext: excelContextSchema,
   assistantContent: z.string().nullable(),
   toolCalls: z.array(
     z.object({
@@ -60,14 +96,44 @@ const chatContinueSchema = z.object({
   ),
   toolResults: z.array(
     z.object({
-      toolCallId: z.string(),
-      content: z.string(),
+      toolCallId: z.string().min(1),
+      content: z.string().max(50000, 'Tool result too large'),
     })
   ),
   allowTools: z.boolean().default(true),
 });
 
 type ChatContinueBody = z.infer<typeof chatContinueSchema>;
+
+/**
+ * Build the base message array (system prompt + context + trimmed history + user message).
+ * Shared across all chat endpoints to avoid duplication.
+ */
+function buildBaseMessages(
+  excelContext: unknown,
+  message: string,
+  history: HistoryMessage[]
+): { messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>; trimmedHistory: HistoryMessage[] } {
+  const contextText = buildContextText(excelContext);
+  const systemPromptContent = ensurePromptFitsTokenBudget(SYSTEM_PROMPT);
+  const contextContent = contextText ? ensurePromptFitsTokenBudget(contextText) : '';
+
+  const systemTokens = countTokens(systemPromptContent) + (contextContent ? countTokens(contextContent) : 0);
+  const maxHistoryTokens = TOKEN_LIMITS.MAX_INPUT_TOKENS - systemTokens - countTokens(message) - CHAT_CONFIG.MESSAGE_TOKEN_RESERVE;
+  const trimmedHistory = trimHistoryToTokenBudget(history, Math.max(maxHistoryTokens, 0));
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: systemPromptContent },
+    ...(contextContent ? [{ role: 'system' as const, content: contextContent }] : []),
+    ...trimmedHistory.map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    })),
+    { role: 'user', content: message },
+  ];
+
+  return { messages, trimmedHistory };
+}
 
 export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
   /**
@@ -103,58 +169,14 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         history = frontendHistory || [];
       }
 
-      // Build system prompt with Excel context
-      // Detect which context type and format accordingly (profile-first vs legacy)
-      let contextText: string;
-      if (excelContext?.profile && excelContext?.inventory) {
-        // New profile-first context (Phase 5C)
-        contextText = formatProfileContext(excelContext as ExcelContextWithProfile);
-      } else if (excelContext?.selection) {
-        // Legacy full context (backwards compatible)
-        contextText = formatExcelContext(excelContext as ExcelContextFull);
-      } else {
-        contextText = '';
-      }
-
-      let systemContent = SYSTEM_PROMPT + contextText;
-
-      // Check token limits and truncate if needed
-      const systemTokens = countTokens(systemContent);
-      if (systemTokens > TOKEN_LIMITS.MAX_INPUT_TOKENS - 1000) {
-        // Leave room for user message + history
-        systemContent = truncateToTokenLimit(
-          systemContent,
-          TOKEN_LIMITS.MAX_INPUT_TOKENS - 1500
-        );
-        fastify.log.warn('System prompt truncated due to token limit');
-      }
-
-      // Trim history to fit token budget (leave room for system + current message)
-      const maxHistoryTokens = TOKEN_LIMITS.MAX_INPUT_TOKENS - countTokens(systemContent) - countTokens(message) - 500;
-      const trimmedHistory = trimHistoryToTokenBudget(history, Math.max(maxHistoryTokens, 0));
+      const { messages, trimmedHistory } = buildBaseMessages(excelContext, message, history);
 
       if (trimmedHistory.length > 0) {
         fastify.log.info({ msg: 'Including conversation history', messageCount: trimmedHistory.length });
       }
 
-      // Build messages array with history
-      const messages = [
-        { role: 'system' as const, content: systemContent },
-        ...trimmedHistory.map(m => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        })),
-        { role: 'user' as const, content: message },
-      ];
-
       // Set SSE headers - use raw response for streaming
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no', // Disable nginx buffering
-        'Access-Control-Allow-Origin': '*', // CORS for SSE
-      });
+      setSseHeaders(reply);
 
       // ═══════════════════════════════════════════════════════════
       // STAGE 1: PLANNER - Detect intent and select tool
@@ -170,31 +192,27 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           }
         | undefined;
 
-      if (excelContext?.profile && excelContext?.inventory) {
-        // Profile-first context
-        const profileCtx = excelContext as ExcelContextWithProfile;
+      if (isProfileContext(excelContext)) {
         excelContextForPlanner = {
-          selection: profileCtx.selection?.address,
-          rows: profileCtx.selection?.size?.rows,
-          cols: profileCtx.selection?.size?.cols,
-          sheet: profileCtx.profile?.sheetName,
-          hasData: !!profileCtx.selection?.data,
+          selection: excelContext.selection?.address,
+          rows: excelContext.selection?.size?.rows,
+          cols: excelContext.selection?.size?.cols,
+          sheet: excelContext.profile?.sheetName,
+          hasData: !!excelContext.selection?.data,
         };
-      } else if (excelContext?.selection) {
-        // Legacy context
-        const legacyCtx = excelContext as ExcelContextFull;
+      } else if (isLegacyContext(excelContext)) {
         excelContextForPlanner = {
-          selection: legacyCtx.selection?.address,
-          rows: legacyCtx.selection?.rowCount,
-          cols: legacyCtx.selection?.columnCount,
-          sheet: legacyCtx.activeSheet,
-          hasData: (legacyCtx.selection?.values?.length ?? 0) > 0,
+          selection: excelContext.selection?.address,
+          rows: excelContext.selection?.rowCount,
+          cols: excelContext.selection?.columnCount,
+          sheet: excelContext.activeSheet,
+          hasData: (excelContext.selection?.values?.length ?? 0) > 0,
         };
       }
 
       let plan;
       try {
-        plan = await planToolCall(message, excelContextForPlanner);
+        plan = await planToolCall(message, excelContextForPlanner, trimmedHistory);
         fastify.log.info({
           msg: 'Planner result',
           intent: plan.intent,
@@ -214,14 +232,14 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       // ═══════════════════════════════════════════════════════════
       if (plan.intent === 'clarify') {
         const clarifyText = plan.clarifyQuestion || 'Could you please clarify what you would like me to do?';
-        reply.raw.write(`data: ${JSON.stringify({ type: 'text', content: clarifyText })}\n\n`);
-        reply.raw.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+        writeSseEvent(reply, { type: 'text', content: clarifyText });
+        writeSseEvent(reply, { type: 'done' });
         reply.raw.end();
         return;
       }
 
       // ═══════════════════════════════════════════════════════════
-      // STAGE 2: EXECUTOR - Execute based on plan
+      // STAGE 2: EXECUTOR - Execute based on plan + router
       // ═══════════════════════════════════════════════════════════
       const provider = getAIProvider();
 
@@ -230,18 +248,42 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       let tools = TOOL_DEFINITIONS;
 
       if (plan.intent === 'action' && plan.tool && isValidToolPlan(plan.tool)) {
-        // FORCE the specific tool - this is the key fix!
         toolChoice = { type: 'function', function: { name: plan.tool } };
-        fastify.log.info({ msg: 'Forcing tool call', tool: plan.tool });
+        fastify.log.info({ msg: 'Forcing write tool call', tool: plan.tool });
+      } else if (plan.intent === 'analysis' && plan.tool && isValidToolPlan(plan.tool)) {
+        toolChoice = { type: 'function', function: { name: plan.tool } };
+        tools = READ_TOOL_DEFINITIONS;
+        fastify.log.info({ msg: 'Analysis mode - forcing read tool', tool: plan.tool });
+      } else if (plan.intent === 'analysis') {
+        toolChoice = 'auto';
+        tools = READ_TOOL_DEFINITIONS;
+        fastify.log.info({ msg: 'Analysis mode - auto read tools' });
       } else if (plan.intent === 'question') {
-        // No tools for questions - pure conversation
         toolChoice = 'none';
         tools = [];
         fastify.log.info({ msg: 'Question mode - no tools' });
       }
 
-      // Send session ID to client so it can track the conversation
-      reply.raw.write(`data: ${JSON.stringify({ type: 'session', sessionId: activeSessionId })}\n\n`);
+      // Router: select optimal model tier based on planner output
+      const tier = classifyTier(plan);
+      const tierConfig = MODEL_TIERS[tier];
+
+      fastify.log.info({
+        msg: 'Router decision',
+        tier,
+        model: tierConfig.model,
+        intent: plan.intent,
+        tool: plan.tool,
+        confidence: plan.confidence,
+      });
+
+      // Send session ID and tier info to client
+      writeSseEvent(reply, {
+        type: 'session',
+        sessionId: activeSessionId,
+        tier,
+        model: tierConfig.model,
+      });
 
       let fullResponseContent = '';
 
@@ -250,18 +292,15 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           messages,
           tools,
           toolChoice,
-          temperature: plan.intent === 'action' ? 0.2 : 0.7, // Low temp for actions
+          temperature: tierConfig.temperature,
+          model: tierConfig.model,
         })) {
-          // Send each event as SSE
-          const data = JSON.stringify(event);
-          reply.raw.write(`data: ${data}\n\n`);
+          if (!writeSseEvent(reply, event)) break; // Client disconnected
 
-          // Collect text content for saving to session
           if (event.type === 'text' && event.content) {
             fullResponseContent += event.content;
           }
 
-          // Log tool calls for debugging
           if (event.type === 'tool_call_end' && event.toolCall) {
             fastify.log.info({
               msg: 'Tool call executed',
@@ -270,7 +309,6 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
             });
           }
 
-          // Log errors
           if (event.type === 'error') {
             fastify.log.error({ msg: 'AI stream error', error: event.error });
           }
@@ -278,9 +316,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         fastify.log.error({ msg: 'Chat stream failed', error: errorMessage });
-
-        // Send error event to client
-        reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: errorMessage })}\n\n`);
+        writeSseEvent(reply, { type: 'error', error: errorMessage });
       }
 
       // Save conversation to session (fire-and-forget, don't block response)
@@ -331,40 +367,13 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         history = frontendHistory || [];
       }
 
-      // Rebuild system prompt from context (same logic as /chat)
-      let contextText: string;
-      if (excelContext?.profile && excelContext?.inventory) {
-        contextText = formatProfileContext(excelContext as ExcelContextWithProfile);
-      } else if (excelContext?.selection) {
-        contextText = formatExcelContext(excelContext as ExcelContextFull);
-      } else {
-        contextText = '';
-      }
-
-      let systemContent = SYSTEM_PROMPT + contextText;
-      const systemTokens = countTokens(systemContent);
-      if (systemTokens > TOKEN_LIMITS.MAX_INPUT_TOKENS - 1000) {
-        systemContent = truncateToTokenLimit(
-          systemContent,
-          TOKEN_LIMITS.MAX_INPUT_TOKENS - 1500
-        );
-      }
-
-      // Trim history to fit token budget
-      const maxHistoryTokens = TOKEN_LIMITS.MAX_INPUT_TOKENS - countTokens(systemContent) - countTokens(message) - 1000;
-      const trimmedHistory = trimHistoryToTokenBudget(history, Math.max(maxHistoryTokens, 0));
-
-      // Build the full message array for OpenAI (with history before current turn)
-      const messages: Array<Record<string, unknown>> = [
-        { role: 'system', content: systemContent },
-        ...trimmedHistory.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
-        { role: 'user', content: message },
+      // Build base messages, then append tool call/result messages for continuation
+      const { messages: baseMessages } = buildBaseMessages(excelContext, message, history);
+      const messages = [
+        ...baseMessages,
         // Assistant message with tool_calls
         {
-          role: 'assistant',
+          role: 'assistant' as const,
           content: assistantContent,
           tool_calls: toolCalls.map((tc) => ({
             id: tc.id,
@@ -380,14 +389,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         })),
       ];
 
-      // Set SSE headers
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no',
-        'Access-Control-Allow-Origin': '*',
-      });
+      setSseHeaders(reply);
 
       const provider = getAIProvider();
 
@@ -395,15 +397,25 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       const tools = allowTools ? TOOL_DEFINITIONS : [];
       const toolChoice: ToolChoice | undefined = allowTools ? 'auto' : 'none';
 
+      // Router: select model tier based on tool result complexity
+      const continuationTier = classifyContinuationTier(toolResults);
+      const continuationTierConfig = MODEL_TIERS[continuationTier];
+
+      fastify.log.info({
+        msg: 'Continuation router decision',
+        tier: continuationTier,
+        model: continuationTierConfig.model,
+      });
+
       try {
         for await (const event of provider.chat({
-          messages: messages as unknown as Parameters<typeof provider.chat>[0]['messages'],
+          messages: messages as Message[],
           tools,
           toolChoice,
-          temperature: 0.5,
+          temperature: continuationTierConfig.temperature,
+          model: continuationTierConfig.model,
         })) {
-          const data = JSON.stringify(event);
-          reply.raw.write(`data: ${data}\n\n`);
+          if (!writeSseEvent(reply, event)) break;
 
           if (event.type === 'tool_call_end' && event.toolCall) {
             fastify.log.info({
@@ -420,7 +432,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         fastify.log.error({ msg: 'Continuation stream failed', error: errorMessage });
-        reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: errorMessage })}\n\n`);
+        writeSseEvent(reply, { type: 'error', error: errorMessage });
       }
 
       reply.raw.end();
@@ -447,21 +459,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
 
       const { message, excelContext } = parseResult.data;
 
-      // Build messages - detect context type
-      let contextText: string;
-      if (excelContext?.profile && excelContext?.inventory) {
-        contextText = formatProfileContext(excelContext as ExcelContextWithProfile);
-      } else if (excelContext?.selection) {
-        contextText = formatExcelContext(excelContext as ExcelContextFull);
-      } else {
-        contextText = '';
-      }
-      const systemContent = SYSTEM_PROMPT + contextText;
-
-      const messages = [
-        { role: 'system' as const, content: systemContent },
-        { role: 'user' as const, content: message },
-      ];
+      const { messages } = buildBaseMessages(excelContext, message, []);
 
       const provider = getAIProvider();
 

@@ -12,6 +12,9 @@ import type {
 } from '@cellix/shared';
 import { PROFILING_LEVEL_ORDER } from '@cellix/shared';
 
+/** Current profile version — cached profiles with older versions are discarded */
+const CURRENT_PROFILE_VERSION = 2;
+
 /** localStorage key for profile cache */
 const STORAGE_KEY = 'cellix_profile_cache';
 
@@ -34,14 +37,14 @@ let inventoryCachedAt: number | null = null;
 export function getCachedProfile(sheetName: string): SheetProfile | null {
   // Check memory cache first
   const entry = memoryCache.get(sheetName);
-  if (entry && !isStale(entry.cachedAt)) {
+  if (entry && !isStale(entry.cachedAt) && entry.version >= CURRENT_PROFILE_VERSION) {
     return entry.profile;
   }
 
   // Check localStorage
   const stored = loadFromStorage();
   const storedEntry = stored[sheetName];
-  if (storedEntry && !isStale(storedEntry.cachedAt)) {
+  if (storedEntry && !isStale(storedEntry.cachedAt) && storedEntry.version >= CURRENT_PROFILE_VERSION) {
     // Hydrate memory cache
     memoryCache.set(sheetName, storedEntry);
     return storedEntry.profile;
@@ -155,22 +158,6 @@ function saveToStorage(cache: Record<string, ProfileCacheEntry>): void {
 }
 
 /**
- * Get cache statistics for debugging.
- */
-export function getCacheStats(): {
-  memoryEntries: number;
-  storageEntries: number;
-  hasInventory: boolean;
-} {
-  const stored = loadFromStorage();
-  return {
-    memoryEntries: memoryCache.size,
-    storageEntries: Object.keys(stored).length,
-    hasInventory: inventoryCache !== null,
-  };
-}
-
-/**
  * Get profile at minimum required level, or null if not available.
  * Returns cached profile only if it meets the minimum level requirement.
  *
@@ -184,8 +171,8 @@ export function getCachedProfileAtLevel(
 ): SheetProfile | null {
   // Check memory cache first
   const entry = memoryCache.get(sheetName);
-  if (entry && !isStale(entry.cachedAt)) {
-    const entryLevel = entry.level ?? 'full'; // Backwards compatibility
+  if (entry && !isStale(entry.cachedAt) && entry.version >= CURRENT_PROFILE_VERSION) {
+    const entryLevel = entry.level ?? 'full';
     if (PROFILING_LEVEL_ORDER[entryLevel] >= PROFILING_LEVEL_ORDER[minLevel]) {
       return entry.profile;
     }
@@ -194,8 +181,8 @@ export function getCachedProfileAtLevel(
   // Check localStorage
   const stored = loadFromStorage();
   const storedEntry = stored[sheetName];
-  if (storedEntry && !isStale(storedEntry.cachedAt)) {
-    const entryLevel = storedEntry.level ?? 'full'; // Backwards compatibility
+  if (storedEntry && !isStale(storedEntry.cachedAt) && storedEntry.version >= CURRENT_PROFILE_VERSION) {
+    const entryLevel = storedEntry.level ?? 'full';
     if (PROFILING_LEVEL_ORDER[entryLevel] >= PROFILING_LEVEL_ORDER[minLevel]) {
       // Hydrate memory cache
       memoryCache.set(sheetName, storedEntry);
@@ -236,25 +223,3 @@ export function needsLevelUpgrade(
   return true;
 }
 
-/**
- * Get the current profiling level for a sheet.
- *
- * @param sheetName - Sheet to check
- * @returns Current profiling level or null if not cached
- */
-export function getCachedLevel(sheetName: string): ProfilingLevel | null {
-  // Check memory cache first
-  const entry = memoryCache.get(sheetName);
-  if (entry && !isStale(entry.cachedAt)) {
-    return entry.level ?? 'full';
-  }
-
-  // Check localStorage
-  const stored = loadFromStorage();
-  const storedEntry = stored[sheetName];
-  if (storedEntry && !isStale(storedEntry.cachedAt)) {
-    return storedEntry.level ?? 'full';
-  }
-
-  return null;
-}

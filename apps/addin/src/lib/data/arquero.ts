@@ -15,30 +15,52 @@ export type ColumnTable = ReturnType<typeof aq.table>;
 
 /**
  * Create an Arquero table from Excel-style 2D array.
- * @param values - 2D array where first row is headers
- * @param hasHeaders - Whether first row contains headers
+ * @param values - 2D array of values
+ * @param hasHeaders - Whether values include a header row
+ * @param headerRowIndex - 0-based index of header row within the values array (default: 0)
+ * @param dataStartIndex - 0-based index where data starts within values (default: headerRowIndex + 1)
+ * @param qualifiedNames - Optional map of column index → qualified name (used as key for dedup)
  */
 export function createTable(
   values: unknown[][],
-  hasHeaders = true
+  hasHeaders = true,
+  headerRowIndex = 0,
+  dataStartIndex?: number,
+  qualifiedNames?: Map<number, string>
 ): ColumnTable | null {
-  if (values.length === 0) {
-    return null;
-  }
+  if (values.length === 0) return null;
 
-  const headers = hasHeaders
-    ? values[0].map((h, i) => String(h ?? `Column${i + 1}`))
+  const effectiveDataStart = dataStartIndex ?? (hasHeaders ? headerRowIndex + 1 : 0);
+
+  // Build raw headers
+  const rawHeaders = hasHeaders
+    ? values[headerRowIndex].map((h, i) => String(h ?? `Column${i + 1}`))
     : values[0].map((_, i) => `Column${i + 1}`);
 
-  const dataRows = hasHeaders ? values.slice(1) : values;
+  const dataRows = values.slice(effectiveDataStart);
+  if (dataRows.length === 0) return null;
 
-  if (dataRows.length === 0) {
-    return null;
+  // Deduplicate column names:
+  // - Use qualifiedName if available (already unique by design: "Shopee > Sum of Quantity")
+  // - Otherwise, suffix duplicates with __2, __3, etc.
+  const usedNames = new Map<string, number>();
+  const finalHeaders: string[] = [];
+
+  for (let i = 0; i < rawHeaders.length; i++) {
+    const baseName = qualifiedNames?.get(i) || rawHeaders[i] || `Column${i + 1}`;
+    let name = baseName;
+
+    const count = usedNames.get(baseName) || 0;
+    if (count > 0) {
+      name = `${baseName}__${count + 1}`;
+    }
+    usedNames.set(baseName, count + 1);
+    finalHeaders.push(name);
   }
 
   // Convert to column-oriented format for Arquero
   const columns: Record<string, unknown[]> = {};
-  headers.forEach((header, colIndex) => {
+  finalHeaders.forEach((header, colIndex) => {
     columns[header] = dataRows.map((row) => row[colIndex]);
   });
 

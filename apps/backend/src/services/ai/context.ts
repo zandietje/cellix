@@ -28,10 +28,11 @@ export function formatExcelContext(context: ExcelContextFull | undefined | null)
 
   const lines: string[] = [];
 
-  lines.push('\n## Current Excel Context\n');
+  lines.push('\n<excel_context>');
+  lines.push('## Current Excel Context\n');
 
   // Basic selection info
-  lines.push(`**Active Sheet:** ${context.activeSheet}`);
+  lines.push(`**Active Sheet:** ${escapeMarkdown(context.activeSheet || 'Unknown')}`);
   lines.push(`**Selection:** ${context.selection.address}`);
   lines.push(
     `**Size:** ${context.selection.rowCount} rows x ${context.selection.columnCount} columns`
@@ -46,7 +47,7 @@ export function formatExcelContext(context: ExcelContextFull | undefined | null)
   // Headers
   if (context.selection.headers.length > 0) {
     lines.push('\n**Headers:**');
-    lines.push(context.selection.headers.join(' | '));
+    lines.push(context.selection.headers.map(h => escapeMarkdown(String(h))).join(' | '));
   }
 
   // Data types per column
@@ -94,8 +95,10 @@ export function formatExcelContext(context: ExcelContextFull | undefined | null)
 
   // All sheets
   if (context.allSheets.length > 1) {
-    lines.push(`\n**All Sheets:** ${context.allSheets.join(', ')}`);
+    lines.push(`\n**All Sheets:** ${context.allSheets.map(s => escapeMarkdown(s)).join(', ')}`);
   }
+
+  lines.push('</excel_context>');
 
   return lines.join('\n');
 }
@@ -147,16 +150,41 @@ export function formatProfileContext(
   const lines: string[] = [];
   const { profile, inventory, selection } = context;
 
-  lines.push('\n## Excel Context\n');
+  lines.push('\n<excel_context>');
+  lines.push('## Excel Context\n');
 
   // Sheet summary
-  lines.push(`**Sheet:** "${profile.sheetName}"`);
+  lines.push(`**Sheet:** "${escapeMarkdown(profile.sheetName)}"`);
   lines.push(
     `**Size:** ${profile.rowCount.toLocaleString()} rows x ${profile.columnCount} columns`
   );
   lines.push(
     `**Selection:** ${selection.address} (${selection.size.rows}x${selection.size.cols})`
   );
+
+  // Selection data (actual values the user is looking at)
+  if (selection.data && selection.data.length > 0) {
+    const isSingleCell = selection.size.rows === 1 && selection.size.cols === 1;
+    if (isSingleCell) {
+      const val = selection.data[0]?.[0];
+      const display = val === null || val === undefined || val === '' ? '(empty)' : String(val);
+      lines.push(`**Cell Value:** ${display}`);
+    } else {
+      const MAX_SELECTION_ROWS = 15;
+      const rowsToShow = selection.data.slice(0, MAX_SELECTION_ROWS);
+      lines.push('\n**Selection Data:**');
+      lines.push('```');
+      for (const row of rowsToShow) {
+        lines.push((row as unknown[]).map((cell) => formatCell(cell)).join('\t'));
+      }
+      lines.push('```');
+      if (selection.data.length > MAX_SELECTION_ROWS) {
+        lines.push(
+          `*(Showing ${MAX_SELECTION_ROWS} of ${selection.data.length} rows)*`
+        );
+      }
+    }
+  }
 
   // Tables
   if (profile.tables.length > 0) {
@@ -170,10 +198,15 @@ export function formatProfileContext(
     lines.push('|-----|--------|------|----------|------|');
 
     for (const col of profile.columns.slice(0, MAX_PROFILE_COLUMNS)) {
-      const header = col.header ? escapeMarkdown(col.header) : '-';
+      // Show qualified name when available, otherwise header, otherwise "-"
+      const displayHeader = col.qualifiedName
+        ? escapeMarkdown(col.qualifiedName)
+        : col.header
+          ? escapeMarkdown(col.header)
+          : '-';
       const info = formatColumnInfo(col);
       lines.push(
-        `| ${col.letter} | ${header} | ${col.dataType} | ${col.inferredName} | ${info} |`
+        `| ${col.letter} | ${displayHeader} | ${col.dataType} | ${col.inferredName} | ${info} |`
       );
     }
 
@@ -182,6 +215,28 @@ export function formatProfileContext(
         `| ... | *${profile.columns.length - MAX_PROFILE_COLUMNS} more columns* | | | |`
       );
     }
+  }
+
+  // Section info for multi-section sheets
+  if (profile.sections && profile.sections.length > 0) {
+    lines.push('\n### Data Sections\n');
+    lines.push('This sheet has multiple data sections arranged side by side:\n');
+    for (const section of profile.sections) {
+      const sectionCols = profile.columns.filter(c => c.section === section.name);
+      const colHeaders = sectionCols
+        .filter(c => c.header)
+        .map(c => c.header)
+        .slice(0, 5)
+        .join(', ');
+      lines.push(`- **${section.name}** (columns ${section.columnRange}): ${colHeaders}`);
+    }
+    lines.push('');
+    lines.push('When querying a specific section, use the section-prefixed column names (e.g., "Shopee > Sum of Quantity").');
+  }
+
+  // Header detection note
+  if (profile.headerRow != null && profile.headerRow > 0) {
+    lines.push(`\n*Note: Headers detected on row ${profile.headerRow + 1}, data starts on row ${profile.dataStartRow + 1}.*`);
   }
 
   // Quality warnings
@@ -205,6 +260,8 @@ export function formatProfileContext(
   lines.push(
     '\n*Use `get_profile`, `select_rows`, or `group_aggregate` to query specific data.*'
   );
+
+  lines.push('</excel_context>');
 
   return lines.join('\n');
 }
@@ -261,4 +318,45 @@ function getQualityWarnings(profile: SheetProfile): string[] {
  */
 function escapeMarkdown(str: string): string {
   return str.replace(/[|\\`*_{}[\]()#+\-.!]/g, '\\$&');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTEXT HELPERS (used by chat routes to avoid duplication)
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { TOKEN_LIMITS, countTokens, truncateToTokenLimit } from '../../lib/tokens.js';
+import { CHAT_CONFIG } from '../../lib/constants.js';
+
+/**
+ * Build system prompt content from excel context.
+ * Handles both profile-first and legacy context formats.
+ * Accepts unknown to work with Zod-inferred types from request validation.
+ */
+export function buildContextText(
+  excelContext?: unknown
+): string {
+  if (!excelContext || typeof excelContext !== 'object') return '';
+
+  const ctx = excelContext as Record<string, unknown>;
+
+  if (ctx.profile && ctx.inventory) {
+    return formatProfileContext(excelContext as ExcelContextWithProfile);
+  }
+
+  if (ctx.selection) {
+    return formatExcelContext(excelContext as ExcelContextFull);
+  }
+
+  return '';
+}
+
+/**
+ * Ensure system prompt fits within token budget.
+ */
+export function ensurePromptFitsTokenBudget(content: string): string {
+  const tokens = countTokens(content);
+  if (tokens > TOKEN_LIMITS.MAX_INPUT_TOKENS - CHAT_CONFIG.SYSTEM_PROMPT_TRUNCATE_BUFFER) {
+    return truncateToTokenLimit(content, TOKEN_LIMITS.MAX_INPUT_TOKENS - CHAT_CONFIG.SYSTEM_PROMPT_TRUNCATE_BUFFER);
+  }
+  return content;
 }

@@ -3,7 +3,6 @@ import { TabNavigation } from './components/common/TabNavigation';
 import { ChatPane } from './components/chat/ChatPane';
 import { ControlPanel } from './components/controls/ControlPanel';
 import { PreviewPanel } from './components/preview/PreviewPanel';
-import { Loading } from './components/common/Loading';
 import { useUIStore } from './store/uiStore';
 import { usePreviewStore } from './store/previewStore';
 
@@ -58,22 +57,10 @@ const useStyles = makeStyles({
   },
 });
 
-interface AppProps {
-  isOfficeInitialized: boolean;
-}
-
-export default function App({ isOfficeInitialized }: AppProps) {
+export default function App() {
   const styles = useStyles();
   const { activeTab } = useUIStore();
   const { isPanelVisible } = usePreviewStore();
-
-  if (!isOfficeInitialized) {
-    return (
-      <div className={styles.container}>
-        <Loading message="Connecting to Excel..." />
-      </div>
-    );
-  }
 
   return (
     <div className={styles.container}>

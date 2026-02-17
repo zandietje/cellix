@@ -6,6 +6,7 @@
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ToolDefinition } from '../ai/types.js';
 import type { ZodObject, ZodRawShape } from 'zod';
+import { WRITE_TOOLS } from '@cellix/shared';
 import * as schemas from './schemas.js';
 
 /**
@@ -40,7 +41,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   ),
   createToolDef(
     'set_formula',
-    'Set an Excel formula in a cell. Useful for calculations that should update automatically. A preview will be shown before execution.',
+    'Set an Excel formula in a cell or range. Use a range address (e.g., "Z2:Z1000") to fill the formula across multiple rows — relative references adjust automatically per row. A preview will be shown before execution.',
     schemas.setFormulaSchema
   ),
   createToolDef(
@@ -127,13 +128,10 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
 ];
 
 /**
- * Set of allowed tool names for validation.
+ * Read-only tool definitions (no write tools).
+ * Used when the AI needs to query data but should not modify Excel.
  */
-export const TOOL_WHITELIST = new Set(TOOL_DEFINITIONS.map((t) => t.function.name));
+export const READ_TOOL_DEFINITIONS: ToolDefinition[] = TOOL_DEFINITIONS.filter(
+  (t) => !(WRITE_TOOLS as readonly string[]).includes(t.function.name)
+);
 
-/**
- * Check if a tool name is allowed.
- */
-export function isToolAllowed(name: string): boolean {
-  return TOOL_WHITELIST.has(name);
-}

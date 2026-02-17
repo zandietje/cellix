@@ -3,6 +3,8 @@
  * These types are shared between the add-in and backend.
  */
 
+import type { ProfileColumnStats } from './profile.js';
+
 /** Data type detected in a column */
 export type DataType = 'number' | 'date' | 'currency' | 'percentage' | 'text' | 'mixed' | 'empty';
 
@@ -18,22 +20,12 @@ export interface DataTypeInfo {
   sampleValues: unknown[];
 }
 
-/** Basic statistics for a numeric column */
-export interface ColumnStats {
+/** Basic statistics for a numeric column (extends ProfileColumnStats with identity fields) */
+export interface ColumnStats extends ProfileColumnStats {
   /** Column index */
   column: number;
   /** Column header */
   header: string;
-  /** Sum of all numeric values */
-  sum: number;
-  /** Average of all numeric values */
-  avg: number;
-  /** Minimum value */
-  min: number;
-  /** Maximum value */
-  max: number;
-  /** Count of numeric values */
-  count: number;
 }
 
 /** Statistics aggregation */
@@ -121,7 +113,7 @@ export interface WriteResult {
 }
 
 // Import profile types for ExcelContextWithProfile
-import type { SheetProfile, WorkbookInventory } from './profile.js';
+import type { SheetProfile, WorkbookInventory } from './profile.js'; // ProfileColumnStats imported at top
 
 /** Selection info for profile-first context (no data by default) */
 export interface ProfileSelectionInfo {

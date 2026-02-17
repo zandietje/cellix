@@ -13,6 +13,8 @@ import type {
   ProfileExtractionOptions,
   SemanticColumnType,
   SheetTableInfo,
+  SheetSection,
+  HeaderDetectionDebug,
   DataType,
   ProfileColumnStats,
 } from '@cellix/shared';
@@ -38,6 +40,326 @@ const MAX_PROFILE_ROWS = 50000;
 
 /** Threshold for using streaming mode (rows) */
 const STREAMING_THRESHOLD = 10000;
+
+/** Maximum rows to scan for header detection */
+const HEADER_SCAN_ROWS = 10;
+
+/** Known ecommerce platform names for section detection boosting */
+const KNOWN_PLATFORMS = new Set([
+  'shopee', 'lazada', 'tiktok', 'tiktok shop', 'brand.com',
+  'offline', 'amazon', 'tokopedia', 'bukalapak', 'blibli',
+  'zalora', 'jd.id', 'wholesale', 'retail', 'b2b', 'b2c',
+]);
+
+/** Date/currency/formatted-number patterns that indicate a data row, not a header */
+const DATA_PATTERN = /^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}|^[$€£¥₱][\d,.]+|^[\d,.]+[$€£¥₱%]|^\d{1,3}(,\d{3})+(\.\d+)?$/;
+
+interface HeaderDetectionResult {
+  /** 0-based absolute index of the detected header row (-1 if none) */
+  headerRow: number;
+  /** 0-based absolute index where data starts */
+  dataStartRow: number;
+  /** Headers extracted from the detected row */
+  headers: string[];
+  /** Index of the chosen section row (-1 if none) */
+  sectionRowIndex: number;
+  /** Detected sections with column ranges */
+  sections: SheetSection[];
+  /** Debug info: all candidate scores */
+  debug: HeaderDetectionDebug;
+}
+
+/**
+ * Detect the actual header row by scoring the first N rows.
+ * Uses multiple signals: fill ratio, text ratio, number penalty,
+ * uniqueness, average text length, and row position.
+ */
+function detectHeaderRow(values: unknown[][], totalCols: number): HeaderDetectionResult {
+  const scanRows = Math.min(values.length, HEADER_SCAN_ROWS);
+
+  if (scanRows === 0) {
+    return {
+      headerRow: -1, dataStartRow: 0, headers: [], sectionRowIndex: -1, sections: [],
+      debug: { candidates: [], chosenRow: -1, sectionRow: -1 },
+    };
+  }
+
+  // Score each row as a header candidate
+  const candidates: Array<{ row: number; score: number }> = [];
+
+  for (let r = 0; r < scanRows; r++) {
+    const row = values[r];
+    const nonEmpty = row.filter(cell => cell != null && cell !== '');
+
+    if (nonEmpty.length === 0) {
+      candidates.push({ row: r, score: 0 });
+      continue;
+    }
+
+    // 1. Fill ratio: what fraction of total columns are non-empty
+    const fillRatio = nonEmpty.length / totalCols;
+
+    // Minimum fill: at least 20% of columns should be non-empty
+    if (fillRatio < 0.2) {
+      candidates.push({ row: r, score: 0 });
+      continue;
+    }
+
+    // 2. Text ratio: fraction of non-empty cells that are actual text strings
+    const textCells = nonEmpty.filter(cell => typeof cell === 'string' && String(cell).trim() !== '');
+    const textRatio = textCells.length / nonEmpty.length;
+
+    // 3. Number penalty: fraction of non-empty cells that are numbers
+    const numericCells = nonEmpty.filter(cell => typeof cell === 'number');
+    const numberPenalty = numericCells.length / nonEmpty.length;
+
+    // 4. Data-pattern penalty: fraction of text cells that look like dates, currencies,
+    //    or formatted numbers. Catches text-heavy data rows (SKU lists with prices/dates)
+    //    that numberPenalty alone would miss.
+    const dataPatternCells = textCells.filter(cell => DATA_PATTERN.test(String(cell).trim()));
+    const dataPatternPenalty = textCells.length > 0 ? dataPatternCells.length / textCells.length : 0;
+
+    // 5. Uniqueness: ratio of unique values to filled cells
+    const uniqueValues = new Set(nonEmpty.map(v => String(v).toLowerCase().trim()));
+    const uniqueRatio = uniqueValues.size / nonEmpty.length;
+    const uniqueBonus = uniqueRatio > 0.6 ? 1.3 : uniqueRatio > 0.3 ? 1.0 : 0.8;
+
+    // 6. Average text length: headers are short (5-25 chars), titles are long (>40)
+    const avgLen = textCells.length > 0
+      ? textCells.reduce((s: number, cell) => s + String(cell).length, 0) / textCells.length
+      : 0;
+    const lengthBonus = avgLen > 0 && avgLen <= 30 ? 1.2 : avgLen > 40 ? 0.6 : 1.0;
+
+    // 7. Position: slight preference for rows closer to top
+    const positionFactor = 1.0 - (r * 0.015);
+
+    // Combined score
+    const score = fillRatio * textRatio * (1 - numberPenalty) * (1 - dataPatternPenalty)
+      * uniqueBonus * lengthBonus * positionFactor;
+
+    candidates.push({ row: r, score });
+  }
+
+  // Find the best header row
+  let headerRow = -1;
+  let bestScore = 0;
+  for (const c of candidates) {
+    if (c.score > bestScore) {
+      bestScore = c.score;
+      headerRow = c.row;
+    }
+  }
+
+  // If best score is 0, no valid header found — use synthetic headers
+  // (NOT row 0, which is likely garbage: empty, a title, or data)
+  if (bestScore === 0) {
+    const syntheticHeaders = Array.from({ length: totalCols }, (_, i) =>
+      `Column${numberToColumn(i + 1)}`
+    );
+    // Find first non-empty row as data start
+    let firstDataRow = 0;
+    for (let r = 0; r < values.length; r++) {
+      if (values[r].some(cell => cell != null && cell !== '')) {
+        firstDataRow = r;
+        break;
+      }
+    }
+    return {
+      headerRow: -1, dataStartRow: firstDataRow, headers: syntheticHeaders,
+      sectionRowIndex: -1, sections: [],
+      debug: { candidates, chosenRow: -1, sectionRow: -1 },
+    };
+  }
+
+  // Extract headers from detected row
+  const headers = values[headerRow].map(cell => String(cell ?? ''));
+
+  // Find data start row (first non-empty row after header)
+  let dataStartRow = headerRow + 1;
+  while (dataStartRow < values.length) {
+    const row = values[dataStartRow];
+    const nonEmpty = row.filter(cell => cell != null && cell !== '');
+    if (nonEmpty.length > 0) break;
+    dataStartRow++;
+  }
+
+  // Section detection: pick the BEST section row above headerRow
+  const headerNonEmptyCount = values[headerRow].filter(cell => cell != null && cell !== '').length;
+
+  interface SectionCandidate {
+    rowIndex: number;
+    labels: string[];
+    score: number;
+  }
+
+  const sectionCandidates: SectionCandidate[] = [];
+
+  for (let r = 0; r < headerRow; r++) {
+    const row = values[r];
+    const nonEmpty = row.filter(cell => cell != null && cell !== '');
+    const nonEmptyCount = nonEmpty.length;
+
+    // Must have at least 2 labels (single-label rows are titles)
+    if (nonEmptyCount < 2) continue;
+
+    // Must be sparser than header row (<50% fill)
+    if (nonEmptyCount >= headerNonEmptyCount * 0.5) continue;
+
+    // All non-empty cells must be text strings
+    const allText = nonEmpty.every(cell => typeof cell === 'string' && String(cell).trim() !== '');
+    if (!allText) continue;
+
+    // Extract labels
+    const labels = nonEmpty.map(cell => String(cell).trim());
+
+    // Score this section row
+    let sectionScore = labels.length; // more labels = better
+
+    // Big bonus for known platform names
+    const platformMatches = labels.filter(l => KNOWN_PLATFORMS.has(l.toLowerCase()));
+    sectionScore += platformMatches.length * 5;
+
+    // Slight bonus for short labels (section names are usually short)
+    const avgLabelLen = labels.reduce((s, l) => s + l.length, 0) / labels.length;
+    if (avgLabelLen <= 15) sectionScore += 2;
+
+    // Proximity bias: section row is typically within 1-2 rows of the header.
+    // A title row at row 0 with "Shopee" shouldn't beat a proper section row
+    // at row 2 when headers are at row 3.
+    const distance = headerRow - r;
+    if (distance <= 2) sectionScore += 3;
+    else if (distance <= 4) sectionScore += 1;
+    // distance > 4: no proximity bonus
+
+    sectionCandidates.push({ rowIndex: r, labels, score: sectionScore });
+  }
+
+  // Pick the best section row (highest score)
+  let sectionRowIndex = -1;
+  let sections: SheetSection[] = [];
+
+  if (sectionCandidates.length > 0) {
+    sectionCandidates.sort((a, b) => b.score - a.score);
+    const bestSection = sectionCandidates[0];
+    sectionRowIndex = bestSection.rowIndex;
+    sections = extractSectionsFromRow(values[sectionRowIndex], totalCols);
+  }
+
+  console.debug('[Profiler] Header detection:', {
+    chosenRow: headerRow,
+    score: bestScore,
+    runnerUp: candidates.filter(c => c.row !== headerRow).sort((a, b) => b.score - a.score)[0],
+    sectionRow: sectionRowIndex,
+    sectionLabels: sectionCandidates[0]?.labels,
+  });
+
+  return {
+    headerRow,
+    dataStartRow,
+    headers,
+    sectionRowIndex,
+    sections,
+    debug: {
+      candidates: candidates.filter(c => c.score > 0),
+      chosenRow: headerRow,
+      sectionRow: sectionRowIndex,
+    },
+  };
+}
+
+/**
+ * Extract section definitions from a sparse row using forward-fill.
+ * Each non-empty cell starts a new section label that fills rightward
+ * until the next non-empty cell.
+ *
+ * Special handling for adjacent field-name/value pairs common in pivots:
+ * e.g., "Customer group2" | "Shopee" → prefer "Shopee" (known platform)
+ */
+function extractSectionsFromRow(row: unknown[], totalCols: number): SheetSection[] {
+  // Forward-fill: build a prefix label for every column
+  const prefixByCol: string[] = new Array(totalCols).fill('');
+  let currentLabel = '';
+
+  for (let c = 0; c < row.length && c < totalCols; c++) {
+    const cell = row[c];
+    if (cell != null && cell !== '') {
+      const cellStr = String(cell).trim();
+
+      // Check if next cell is also non-empty (adjacent pair)
+      const nextCell = c + 1 < row.length ? row[c + 1] : null;
+      if (nextCell != null && nextCell !== '') {
+        const nextStr = String(nextCell).trim();
+        // Prefer the known platform name, or the second (more specific) label
+        if (KNOWN_PLATFORMS.has(nextStr.toLowerCase())) {
+          currentLabel = nextStr;
+          prefixByCol[c] = currentLabel;
+          c++; // skip next cell, we consumed it
+          prefixByCol[c] = currentLabel;
+          continue;
+        } else if (KNOWN_PLATFORMS.has(cellStr.toLowerCase())) {
+          currentLabel = cellStr;
+        } else {
+          // Neither is a known platform — use the second (usually more specific)
+          currentLabel = nextStr;
+          prefixByCol[c] = currentLabel;
+          c++; // skip next cell
+          prefixByCol[c] = currentLabel;
+          continue;
+        }
+      } else {
+        currentLabel = cellStr;
+      }
+    }
+    prefixByCol[c] = currentLabel;
+  }
+
+  // Build sections from contiguous runs of the same label
+  const sections: SheetSection[] = [];
+  let currentSection: { name: string; startCol: number } | null = null;
+
+  for (let c = 0; c < totalCols; c++) {
+    const label = prefixByCol[c];
+    if (!label) {
+      // No section — close current if any
+      if (currentSection) {
+        sections.push({
+          name: currentSection.name,
+          startCol: currentSection.startCol,
+          endCol: c - 1,
+          columnRange: `${numberToColumn(currentSection.startCol + 1)}-${numberToColumn(c)}`,
+        });
+        currentSection = null;
+      }
+      continue;
+    }
+
+    if (!currentSection || currentSection.name !== label) {
+      // Close previous section
+      if (currentSection) {
+        sections.push({
+          name: currentSection.name,
+          startCol: currentSection.startCol,
+          endCol: c - 1,
+          columnRange: `${numberToColumn(currentSection.startCol + 1)}-${numberToColumn(c)}`,
+        });
+      }
+      // Start new section
+      currentSection = { name: label, startCol: c };
+    }
+  }
+
+  // Close last section
+  if (currentSection) {
+    sections.push({
+      name: currentSection.name,
+      startCol: currentSection.startCol,
+      endCol: totalCols - 1,
+      columnRange: `${numberToColumn(currentSection.startCol + 1)}-${numberToColumn(totalCols)}`,
+    });
+  }
+
+  return sections;
+}
 
 /** Sheet metadata result types */
 type EmptySheetMetadata = { sheetName: string; isEmpty: true };
@@ -103,8 +425,10 @@ export async function extractSheetProfile(
       columnCount: 0,
       columns: [],
       tables: [],
+      headerRow: -1,
+      dataStartRow: 0,
       extractedAt: Date.now(),
-      version: 1,
+      version: 2,
     };
   }
 
@@ -145,15 +469,49 @@ export async function extractSheetProfile(
     // Cap at MAX_PROFILE_ROWS for statistics
     const cappedValues = values.length > MAX_PROFILE_ROWS ? values.slice(0, MAX_PROFILE_ROWS) : values;
 
-    // Extract headers (first row)
-    const headers =
-      cappedValues.length > 0 ? cappedValues[0].map((cell) => String(cell ?? '')) : [];
+    // Smart header detection: scan first N rows to find actual header row
+    const detection = detectHeaderRow(cappedValues, totalCols);
+    const headers = detection.headers;
+
+    // Build a virtual values array: [header row, data rows...]
+    // This lets buildColumnProfiles work correctly regardless of
+    // where headers and data are in the original sheet.
+    const dataValues = detection.dataStartRow < cappedValues.length
+      ? [
+          headers.map((h, i) => h || `Column${i + 1}`),
+          ...cappedValues.slice(detection.dataStartRow),
+        ]
+      : [headers.map((h, i) => h || `Column${i + 1}`)];
 
     // Get table info
     const tables = await extractTableInfo(sheet, context);
 
+    // Build qualified names map from detected sections (needed for Arquero dedup)
+    const qualifiedNames = new Map<number, string>();
+    for (const section of detection.sections) {
+      for (let i = section.startCol; i <= section.endCol && i < headers.length; i++) {
+        const h = headers[i] || `Column ${numberToColumn(i + 1)}`;
+        qualifiedNames.set(i, `${section.name} > ${h}`);
+      }
+    }
+
     // Build column profiles
-    const columns = buildColumnProfiles(cappedValues, headers);
+    const columns = buildColumnProfiles(dataValues, headers, qualifiedNames);
+
+    // Enrich columns with section info and qualified names
+    for (const col of columns) {
+      const section = detection.sections.find(
+        s => col.index >= s.startCol && col.index <= s.endCol
+      );
+      if (section) {
+        col.section = section.name;
+        if (col.header) {
+          col.qualifiedName = `${section.name} > ${col.header}`;
+        } else {
+          col.qualifiedName = `${section.name} > Column ${col.letter}`;
+        }
+      }
+    }
 
     return {
       sheetName: metadata.sheetName,
@@ -162,8 +520,12 @@ export async function extractSheetProfile(
       columnCount: totalCols,
       columns,
       tables,
+      headerRow: detection.headerRow,
+      dataStartRow: detection.dataStartRow,
+      sections: detection.sections.length > 0 ? detection.sections : undefined,
+      headerDetection: detection.debug,
       extractedAt: Date.now(),
-      version: 1,
+      version: 2,
     };
   });
 }
@@ -296,20 +658,30 @@ async function extractTableInfo(
 
 /**
  * Build column profiles from values.
+ * @param qualifiedNames - Optional map of column index → qualified name for dedup
  */
-function buildColumnProfiles(values: unknown[][], headers: string[]): ColumnProfile[] {
+function buildColumnProfiles(
+  values: unknown[][],
+  headers: string[],
+  qualifiedNames?: Map<number, string>
+): ColumnProfile[] {
   if (values.length < 2 || headers.length === 0) {
     return [];
   }
 
   const dataRows = values.slice(1);
-  const table = createTable(values, true);
+  const table = createTable(values, true, 0, undefined, qualifiedNames);
+
+  // Get actual column names from the table (may be deduped or qualified)
+  // so stats/quality lookups use the correct name
+  const tableColNames = table ? (table.columnNames() as string[]) : [];
 
   return headers.map((header, index) => {
     const columnValues = dataRows.map((row) => row[index]);
     const dataType = detectDataType(columnValues);
-    const stats = table ? calculateColumnStats(table, header) : null;
-    const quality = detectQualitySignals(table, header, columnValues, dataType);
+    const lookupName = tableColNames[index] ?? header;
+    const stats = table ? calculateColumnStats(table, lookupName) : null;
+    const quality = detectQualitySignals(table, lookupName, columnValues, dataType);
 
     return {
       index,
@@ -319,7 +691,7 @@ function buildColumnProfiles(values: unknown[][], headers: string[]): ColumnProf
       dataType,
       stats,
       samples: getSamples(columnValues, 3),
-      uniqueCount: table ? countUnique(table, header) : 0,
+      uniqueCount: table ? countUnique(table, lookupName) : 0,
       nullCount: countNulls(columnValues),
       quality,
     };
@@ -461,23 +833,31 @@ async function extractProfileWithStreaming(
 ): Promise<SheetProfile> {
   const { chunkSize = DEFAULT_CHUNK_SIZE, onProgress, abortSignal } = options;
 
-  // First, read just the headers
+  // First, read the first N rows for header detection
   let headers: string[] = [];
   let tables: SheetTableInfo[] = [];
+  let detectionResult: HeaderDetectionResult = {
+    headerRow: -1, dataStartRow: 0, headers: [], sectionRowIndex: -1, sections: [],
+    debug: { candidates: [], chosenRow: -1, sectionRow: -1 },
+  };
 
   await Excel.run(async (context) => {
     const sheet = context.workbook.worksheets.getItem(sheetName);
 
-    // Get headers (first row)
-    const headerRange = sheet.getRangeByIndexes(0, 0, 1, totalCols);
-    headerRange.load('values');
+    // Read first HEADER_SCAN_ROWS rows for header detection
+    const scanRowCount = Math.min(HEADER_SCAN_ROWS, totalRows);
+    const scanRange = sheet.getRangeByIndexes(0, 0, scanRowCount, totalCols);
+    scanRange.load('values');
     await context.sync();
 
-    headers = headerRange.values[0].map((h) => String(h ?? ''));
+    detectionResult = detectHeaderRow(scanRange.values, totalCols);
+    headers = detectionResult.headers;
 
     // Get table info
     tables = await extractTableInfo(sheet, context);
   });
+
+  const detection = detectionResult;
 
   // Check for cancellation
   if (abortSignal?.aborted) {
@@ -491,7 +871,8 @@ async function extractProfileWithStreaming(
 
   // Track how many data rows we've processed
   let processedRows = 0;
-  let isFirstChunk = true;
+  let absoluteRowIndex = 0;
+  const dataStart = detection.dataStartRow;
 
   // Stream through the data
   for await (const chunk of streamLargeRange(sheetName, undefined, {
@@ -499,12 +880,14 @@ async function extractProfileWithStreaming(
     onProgress,
     abortSignal,
   })) {
-    // Skip header row in first chunk
-    const dataChunk = isFirstChunk ? chunk.slice(1) : chunk;
-    isFirstChunk = false;
-
     // Process each row
-    for (const row of dataChunk) {
+    for (const row of chunk) {
+      // Skip all rows before dataStartRow (headers, section rows, empty gaps)
+      if (absoluteRowIndex < dataStart) {
+        absoluteRowIndex++;
+        continue;
+      }
+      absoluteRowIndex++;
       processedRows++;
 
       // Only process up to MAX_PROFILE_ROWS for statistics
@@ -580,6 +963,21 @@ async function extractProfileWithStreaming(
     };
   });
 
+  // Enrich columns with section info and qualified names
+  for (const col of columns) {
+    const section = detection.sections.find(
+      (s: SheetSection) => col.index >= s.startCol && col.index <= s.endCol
+    );
+    if (section) {
+      col.section = section.name;
+      if (col.header) {
+        col.qualifiedName = `${section.name} > ${col.header}`;
+      } else {
+        col.qualifiedName = `${section.name} > Column ${col.letter}`;
+      }
+    }
+  }
+
   return {
     sheetName,
     usedRange,
@@ -587,8 +985,12 @@ async function extractProfileWithStreaming(
     columnCount: totalCols,
     columns,
     tables,
+    headerRow: detection.headerRow,
+    dataStartRow: detection.dataStartRow,
+    sections: detection.sections.length > 0 ? detection.sections : undefined,
+    headerDetection: detection.debug,
     extractedAt: Date.now(),
-    version: 1,
+    version: 2,
   };
 }
 

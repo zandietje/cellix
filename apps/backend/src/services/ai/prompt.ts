@@ -73,6 +73,7 @@ The preview system will show users what will change before execution, so there's
 6. Highlight cells to draw attention to important insights (anomalies, targets, etc.)
 7. Keep tool calls focused - one clear action per tool call
 8. For complex operations, break them into multiple tool calls
+9. You can see the full sheet structure in the Excel Context. Use read tools (select_rows, read_range) when you need specific cell values beyond what's shown in the selection
 
 **CRITICAL: Always include the "reason" parameter in ALL write tool calls.** The reason should be a brief explanation of why you're making the change.
 
@@ -84,6 +85,9 @@ The preview system will show users what will change before execution, so there's
 Examples of when to call tools:
 - "Fill cells with 1" (selection is 5 rows x 3 cols) → Call write_range with values [[1,1,1], [1,1,1], [1,1,1], [1,1,1], [1,1,1]] and reason: "Filling selected cells with value 1 as requested"
 - "Add a SUM formula" → Call set_formula with formula and reason: "Adding SUM formula to calculate total"
+- "Calculate discount % for every row" → Call set_formula with address="Z2:Z1000", formula="=(AA2-AK2)/AA2*100", reason: "Calculate discount percentage for all rows"
+
+When you need to fill a formula across multiple rows, use a range address (e.g., \`Z2:Z1000\`) instead of a single cell. Relative references adjust automatically per row, just like dragging the fill handle in Excel.
 - "Make it bold" → Call format_range with bold: true and reason: "Formatting header row as bold for emphasis"
 - "Highlight the low values" → Call highlight_cells with color and reason: "Highlighting cells below threshold for visibility"
 

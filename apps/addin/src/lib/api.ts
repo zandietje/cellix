@@ -1,17 +1,13 @@
-import axios, { AxiosError } from 'axios';
 import type {
-  ApiResponse,
-  HealthResponse,
   ChatStreamEvent,
   ExcelContextFull,
   ExcelContextWithProfile,
 } from '@cellix/shared';
 
+import { API_CONFIG } from './constants';
+
 /** Context type that can be sent to the API (either legacy or profile-first) */
 export type ChatContext = ExcelContextFull | ExcelContextWithProfile;
-
-/** Maximum size (characters) for a single tool result sent back to the AI */
-const MAX_TOOL_RESULT_SIZE = 8000;
 
 /**
  * Get the API base URL.
@@ -27,12 +23,10 @@ function getApiBaseUrl(): string {
 
   // In production, VITE_API_URL must be set
   if (import.meta.env.PROD) {
-    console.error(
-      'VITE_API_URL environment variable is required in production. ' +
-        'Set it to the backend API URL (e.g., https://api.cellix.app/api)'
+    throw new Error(
+      'VITE_API_URL is required in production. ' +
+        'Set it to the backend URL (e.g., https://api.cellix.app/api)'
     );
-    // Return a placeholder that will fail gracefully
-    return '/api';
   }
 
   // In development, use proxy path (Vite handles the proxy)
@@ -41,43 +35,6 @@ function getApiBaseUrl(): string {
 
 const API_BASE_URL = getApiBaseUrl();
 
-export const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-// Response interceptor for error handling
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error: AxiosError<ApiResponse<unknown>>) => {
-    const message = error.response?.data?.error?.message || 'Network error';
-    console.error('API Error:', message);
-    return Promise.reject(new Error(message));
-  }
-);
-
-/** Check if the backend is healthy */
-export async function checkHealth(): Promise<boolean> {
-  try {
-    const response = await apiClient.get<HealthResponse>('/health');
-    return response.data.status === 'ok';
-  } catch {
-    return false;
-  }
-}
-
-/** Get detailed health status */
-export async function getHealthStatus(): Promise<HealthResponse | null> {
-  try {
-    const response = await apiClient.get<HealthResponse>('/health');
-    return response.data;
-  } catch {
-    return null;
-  }
-}
 
 // ============================================
 // SSE Stream Parser
@@ -151,7 +108,7 @@ export async function* streamChat(
   message: string,
   excelContext?: ChatContext | null,
   sessionId?: string | null,
-  history?: HistoryMessage[]
+  history?: HistoryMessage[],
 ): AsyncGenerator<ChatStreamEvent, void, unknown> {
   const response = await fetch(`${API_BASE_URL}/chat`, {
     method: 'POST',
@@ -213,7 +170,7 @@ export interface ChatContinueParams {
 function truncateToolResult(result: unknown): string {
   const str = typeof result === 'string' ? result : JSON.stringify(result);
 
-  if (str.length <= MAX_TOOL_RESULT_SIZE) {
+  if (str.length <= API_CONFIG.MAX_TOOL_RESULT_SIZE) {
     return str;
   }
 
@@ -226,23 +183,23 @@ function truncateToolResult(result: unknown): string {
       truncated: true,
       note: `Showing first 20 of ${result.length} results`,
     });
-    if (json.length <= MAX_TOOL_RESULT_SIZE) return json;
+    if (json.length <= API_CONFIG.MAX_TOOL_RESULT_SIZE) return json;
   }
 
   // For objects with a rows/data property, truncate that
   if (result && typeof result === 'object' && 'rows' in result) {
     const obj = result as Record<string, unknown>;
-    const rows = Array.isArray(obj.rows) ? obj.rows.slice(0, 20) : obj.rows;
+    const rows = Array.isArray(obj.rows) ? obj.rows.slice(0, API_CONFIG.TRUNCATE_ROWS) : obj.rows;
     const json = JSON.stringify({
       ...obj,
       rows,
       truncated: true,
     });
-    if (json.length <= MAX_TOOL_RESULT_SIZE) return json;
+    if (json.length <= API_CONFIG.MAX_TOOL_RESULT_SIZE) return json;
   }
 
   // Last resort: simple character truncation
-  return str.slice(0, MAX_TOOL_RESULT_SIZE - 50) + '\n...[Result truncated]';
+  return str.slice(0, API_CONFIG.MAX_TOOL_RESULT_SIZE - 50) + '\n...[Result truncated]';
 }
 
 /**
@@ -298,22 +255,3 @@ export async function* continueChat(
   yield* parseSSEStream(response);
 }
 
-/**
- * Send a chat message (non-streaming, for testing).
- * Accepts either profile-first or legacy context.
- */
-export async function sendChatSync(
-  message: string,
-  excelContext?: ChatContext | null
-): Promise<{ content: string; toolCalls: Array<{ id: string; name: string; parameters: Record<string, unknown> }> }> {
-  const response = await apiClient.post('/chat/sync', {
-    message,
-    excelContext: excelContext ?? undefined,
-  });
-
-  if (!response.data.success) {
-    throw new Error(response.data.error?.message || 'Chat request failed');
-  }
-
-  return response.data.data;
-}

@@ -7,12 +7,6 @@ export interface HistoryMessage {
   content: string;
 }
 
-export interface ChatSession {
-  id: string;
-  messages: HistoryMessage[];
-  tokenUsage: { input: number; output: number };
-}
-
 /**
  * Create a new chat session.
  * Returns a temporary ID if Supabase is not configured.
@@ -127,8 +121,8 @@ export function trimHistoryToTokenBudget(
     }
 
     totalTokens += tokens;
-    result.unshift(msg);
+    result.push(msg);
   }
 
-  return result;
+  return result.reverse();
 }

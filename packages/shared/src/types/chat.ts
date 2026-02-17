@@ -36,6 +36,10 @@ export interface ChatMessage {
   timestamp: number;
   /** Tool calls included in this message (assistant only) */
   toolCalls?: ToolCall[];
+  /** Model tier used (assistant only, set from session event) */
+  tier?: string;
+  /** Model used (assistant only, set from session event) */
+  model?: string;
 }
 
 /** Request body for chat endpoint */
@@ -68,6 +72,10 @@ export interface ChatStreamEvent {
   toolCall?: ToolCallChunk;
   /** Session ID (for session events) */
   sessionId?: string;
+  /** Model tier used for this response (for session events) */
+  tier?: string;
+  /** Model used for this response (for session events) */
+  model?: string;
   /** Error message (for error events) */
   error?: string;
 }

@@ -21,6 +21,7 @@ import {
   Warning24Regular,
 } from '@fluentui/react-icons';
 import type { PreviewData } from '../../lib/tools/types';
+import { formatToolName } from '../../lib/formatters';
 import { DiffDialog } from './DiffDialog';
 
 const useStyles = makeStyles({
@@ -100,11 +101,6 @@ export function ActionCard({ preview, onApprove, onReject, disabled }: ActionCar
   const { toolCall, affectedRange, cellCount, changes, warnings, validation, reason } = preview;
   const hasErrors = !validation.valid;
   const hasWarnings = warnings.length > 0;
-
-  // Format tool name for display
-  const formatToolName = (name: string) => {
-    return name.replace(/_/g, ' ');
-  };
 
   // Get card style based on state
   const cardClassName = hasErrors

@@ -20,6 +20,7 @@ import {
 } from '@fluentui/react-icons';
 import { isWriteTool } from '@cellix/shared';
 import type { ToolCall, ToolCallStatus } from '@cellix/shared';
+import { formatToolName, getParamSummary } from '../../lib/formatters';
 import { ToolResultDisplay } from './ToolResultDisplay';
 
 const useStyles = makeStyles({
@@ -102,70 +103,6 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const { name, parameters, status, error, result } = toolCall;
   const config = statusConfig[status];
 
-  // Format tool name for display
-  const formatToolName = (toolName: string) => {
-    return toolName.replace(/_/g, ' ');
-  };
-
-  // Get parameter summary
-  const getParamSummary = (): string => {
-    const params = parameters as Record<string, unknown>;
-    const parts: string[] = [];
-
-    if (params.address) {
-      parts.push(`${params.address}`);
-    }
-
-    if (params.formula && typeof params.formula === 'string') {
-      const formula = params.formula.length > 30
-        ? params.formula.substring(0, 30) + '...'
-        : params.formula;
-      parts.push(`formula: ${formula}`);
-    }
-
-    if (params.values && Array.isArray(params.values)) {
-      const values = params.values as unknown[][];
-      const rows = values.length;
-      const cols = values[0]?.length || 0;
-      parts.push(`${rows}x${cols} values`);
-    }
-
-    if (params.name) {
-      parts.push(`name: ${params.name}`);
-    }
-
-    if (params.color) {
-      parts.push(`color: ${params.color}`);
-    }
-
-    // Read tool parameters
-    if (params.columns && Array.isArray(params.columns)) {
-      parts.push(`columns: ${(params.columns as string[]).join(', ')}`);
-    }
-
-    if (params.groupBy && Array.isArray(params.groupBy)) {
-      parts.push(`group by: ${(params.groupBy as string[]).join(', ')}`);
-    }
-
-    if (params.column && typeof params.column === 'string' && !params.columns) {
-      parts.push(`column: ${params.column}`);
-    }
-
-    if (params.query && typeof params.query === 'string') {
-      parts.push(`query: "${params.query}"`);
-    }
-
-    if (params.sheet && typeof params.sheet === 'string') {
-      parts.push(`sheet: ${params.sheet}`);
-    }
-
-    if (params.method && typeof params.method === 'string') {
-      parts.push(`method: ${params.method}`);
-    }
-
-    return parts.join(' | ') || 'No parameters';
-  };
-
   return (
     <div className={styles.container}>
       <Wrench24Regular className={styles.icon} />
@@ -182,7 +119,7 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
             </Badge>
           </Tooltip>
         </div>
-        <Text className={styles.params}>{getParamSummary()}</Text>
+        <Text className={styles.params}>{getParamSummary(parameters as Record<string, unknown>)}</Text>
         {error && (
           <Text
             size={200}

@@ -11,9 +11,7 @@ import { streamChat, continueChat } from '@/lib/api';
 import type { ToolResult, HistoryMessage } from '@/lib/api';
 import { generatePreview, executeToolCall, isWriteTool, isReadTool } from '@/lib/tools';
 import type { ToolCall, ChatStreamEvent } from '@cellix/shared';
-
-/** Maximum number of tool execution + continuation iterations to prevent infinite loops */
-const MAX_CONTINUATION_ITERATIONS = 3;
+import { CHAT_CONFIG } from '@/lib/constants';
 
 const useStyles = makeStyles({
   container: {
@@ -61,6 +59,7 @@ export function ChatPane() {
     setSessionId,
     updateToolCallStatus,
     setToolCallResult,
+    setLastAssistantMeta,
   } = useChatStore();
   const { context: excelContext } = useExcelStore();
   const { addPendingAction } = usePreviewStore();
@@ -86,6 +85,10 @@ export function ChatPane() {
             if (event.sessionId) {
               setSessionId(event.sessionId);
             }
+            // Store tier/model metadata on the current assistant message
+            if (event.tier && event.model) {
+              setLastAssistantMeta(event.tier, event.model);
+            }
             break;
 
           case 'text':
@@ -96,45 +99,33 @@ export function ChatPane() {
             break;
 
           case 'tool_call_start':
-          case 'tool_call_delta':
-            if (event.toolCall) {
-              const idx = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
+          case 'tool_call_delta': {
+            const tc = event.toolCall;
+            if (tc?.id) {
+              const idx = toolCalls.findIndex((t) => t.id === tc.id);
               if (idx >= 0) {
-                toolCalls[idx] = {
-                  id: event.toolCall.id,
-                  name: event.toolCall.name,
-                  arguments: event.toolCall.arguments,
-                };
-              } else if (event.toolCall.id) {
-                toolCalls.push({
-                  id: event.toolCall.id,
-                  name: event.toolCall.name,
-                  arguments: event.toolCall.arguments,
-                });
-              }
-              updateLastAssistantMessage(fullContent, toolCalls);
-            }
-            break;
-
-          case 'tool_call_end':
-            if (event.toolCall) {
-              const idx = toolCalls.findIndex((tc) => tc.id === event.toolCall!.id);
-              if (idx >= 0) {
-                toolCalls[idx] = {
-                  id: event.toolCall.id,
-                  name: event.toolCall.name,
-                  arguments: event.toolCall.arguments,
-                };
+                toolCalls[idx] = { id: tc.id, name: tc.name, arguments: tc.arguments };
               } else {
-                toolCalls.push({
-                  id: event.toolCall.id,
-                  name: event.toolCall.name,
-                  arguments: event.toolCall.arguments,
-                });
+                toolCalls.push({ id: tc.id, name: tc.name, arguments: tc.arguments });
               }
               updateLastAssistantMessage(fullContent, toolCalls);
             }
             break;
+          }
+
+          case 'tool_call_end': {
+            const tc = event.toolCall;
+            if (tc?.id) {
+              const idx = toolCalls.findIndex((t) => t.id === tc.id);
+              if (idx >= 0) {
+                toolCalls[idx] = { id: tc.id, name: tc.name, arguments: tc.arguments };
+              } else {
+                toolCalls.push({ id: tc.id, name: tc.name, arguments: tc.arguments });
+              }
+              updateLastAssistantMessage(fullContent, toolCalls);
+            }
+            break;
+          }
 
           case 'error':
             fullContent += `\n\n*Error: ${event.error}*`;
@@ -148,7 +139,7 @@ export function ChatPane() {
 
       return { content: fullContent, toolCalls };
     },
-    [updateLastAssistantMessage, setSessionId]
+    [updateLastAssistantMessage, setSessionId, setLastAssistantMeta]
   );
 
   /**
@@ -160,6 +151,7 @@ export function ChatPane() {
     async (toolCalls: Array<{ id: string; name: string; arguments: string }>) => {
       const readResults: ToolResult[] = [];
       let hasWriteTools = false;
+      let hasValidationErrors = false;
 
       for (const tc of toolCalls) {
         try {
@@ -180,9 +172,20 @@ export function ChatPane() {
           if (isWriteTool(tc.name)) {
             hasWriteTools = true;
             const preview = await generatePreview(toolCall);
-            addPendingAction(preview);
+
             if (!preview.validation.valid) {
+              // Validation failed — send error back to AI so it can retry
+              hasValidationErrors = true;
               updateToolCallStatus(tc.id, 'error');
+              readResults.push({
+                toolCallId: tc.id,
+                toolName: tc.name,
+                result: `Validation failed: ${preview.validation.errors.map(e => e.message).join('; ')}. Please fix the parameters and try again.`,
+                isError: true,
+              });
+            } else {
+              // Valid write tool — show preview for user approval
+              addPendingAction(preview);
             }
           } else if (isReadTool(tc.name)) {
             // Read tools: Execute and collect result for AI continuation
@@ -218,7 +221,7 @@ export function ChatPane() {
         }
       }
 
-      return { readResults, hasWriteTools };
+      return { readResults, hasWriteTools, hasValidationErrors };
     },
     [addPendingAction, updateToolCallStatus, setToolCallResult]
   );
@@ -248,7 +251,7 @@ export function ChatPane() {
    *    a. Execute read tools immediately, generate previews for write tools
    *    b. Send read tool results back to AI via /api/chat/continue
    *    c. Stream the AI's analysis response
-   *    d. If AI requests more tools, repeat (up to MAX_CONTINUATION_ITERATIONS)
+   *    d. If AI requests more tools, repeat (up to CHAT_CONFIG.MAX_CONTINUATION_ITERATIONS)
    * 3. Display final response
    */
   const processStream = useCallback(
@@ -264,24 +267,25 @@ export function ChatPane() {
       let currentToolCalls = initial.toolCalls;
       let iteration = 0;
 
-      while (currentToolCalls.length > 0 && iteration < MAX_CONTINUATION_ITERATIONS) {
+      while (currentToolCalls.length > 0 && iteration < CHAT_CONFIG.MAX_CONTINUATION_ITERATIONS) {
         iteration++;
 
         // Execute tools and collect read results
         setExecutingTools(true);
-        const { readResults, hasWriteTools } = await executeAndCollectResults(currentToolCalls);
+        const { readResults, hasWriteTools, hasValidationErrors } = await executeAndCollectResults(currentToolCalls);
         setExecutingTools(false);
 
         // Stop the loop if:
-        // - Write tools are present (need user approval first)
-        // - No read results to send back to AI
-        if (hasWriteTools || readResults.length === 0) break;
+        // - Valid write tools are present (need user approval first) and no errors to retry
+        // - No results to send back to AI
+        if (hasWriteTools && !hasValidationErrors) break;
+        if (readResults.length === 0) break;
 
         // Add new assistant message placeholder for the continuation response
         addMessage({ role: 'assistant', content: '' });
 
         // Send tool results back to AI and stream the continuation
-        const isFinalIteration = iteration >= MAX_CONTINUATION_ITERATIONS;
+        const isFinalIteration = iteration >= CHAT_CONFIG.MAX_CONTINUATION_ITERATIONS;
         const continuation = await consumeStream(
           continueChat({
             message: userMessage,

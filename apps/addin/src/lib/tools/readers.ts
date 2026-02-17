@@ -95,13 +95,13 @@ export async function executeSelectRows(params: SelectRowsParams): Promise<Selec
     return { rows: [], total: 0, columns: [] };
   }
 
-  const table = createTable(values, true);
+  const profile = await executeGetProfile({ sheet: params.sheet });
+  const table = createTableFromProfile(values, profile);
 
   if (!table) {
     return { rows: [], total: 0, columns: [] };
   }
 
-  const profile = await executeGetProfile({ sheet: params.sheet });
   let result = table;
 
   // Apply filters
@@ -154,13 +154,13 @@ export async function executeGroupAggregate(
     return { groups: [], groupBy: [], metrics: [] };
   }
 
-  const table = createTable(values, true);
+  const profile = await executeGetProfile({ sheet: params.sheet });
+  const table = createTableFromProfile(values, profile);
 
   if (!table) {
     return { groups: [], groupBy: [], metrics: [] };
   }
 
-  const profile = await executeGetProfile({ sheet: params.sheet });
   let result = table;
 
   // Apply filters
@@ -261,13 +261,12 @@ export async function executeFindOutliers(params: FindOutliersParams): Promise<F
     return { outliers: [], stats: null, method: params.method };
   }
 
-  const table = createTable(values, true);
+  const profile = await executeGetProfile({ sheet: params.sheet });
+  const table = createTableFromProfile(values, profile);
 
   if (!table) {
     return { outliers: [], stats: null, method: params.method };
   }
-
-  const profile = await executeGetProfile({ sheet: params.sheet });
   const col = resolveColumn(params.column, profile);
   const threshold = params.threshold ?? 2;
   const limit = Math.min(params.limit ?? 20, LIMITS.FIND_OUTLIERS);
@@ -385,16 +384,16 @@ export async function executeSearchValues(params: SearchValuesParams): Promise<S
     return { matches: [], total: 0 };
   }
 
-  const table = createTable(values, true);
+  const profile = await executeGetProfile({});
+  const table = createTableFromProfile(values, profile);
 
   if (!table) {
     return { matches: [], total: 0 };
   }
 
-  const profile = await executeGetProfile({});
   const searchCols =
     params.columns?.map((c) => resolveColumn(c, profile)) ??
-    profile.columns.map((c) => c.header).filter((h): h is string => h !== null);
+    profile.columns.map((c) => c.qualifiedName ?? c.header).filter((h): h is string => h !== null);
 
   const query = params.query.toLowerCase();
   const limit = Math.min(params.limit ?? 20, LIMITS.SEARCH_VALUES);
@@ -632,15 +631,85 @@ async function readSheetData(sheetName?: string): Promise<unknown[][]> {
 }
 
 /**
- * Resolve column reference (letter or name) to column name.
+ * Create an Arquero table from raw sheet values using profile metadata.
+ * Handles the headerRow=-1 case (synthetic headers) by prepending
+ * profile-derived column names as row 0.
+ */
+function createTableFromProfile(values: unknown[][], profile: SheetProfile): ColumnTable | null {
+  if (values.length === 0) return null;
+
+  // Build qualified name map for Arquero dedup
+  const qualifiedNames = new Map<number, string>();
+  for (const col of profile.columns) {
+    if (col.qualifiedName) {
+      qualifiedNames.set(col.index, col.qualifiedName);
+    }
+  }
+
+  if (profile.headerRow === -1) {
+    // No header row detected — build a virtual values array with
+    // synthetic headers from the profile as row 0, followed by data rows
+    const syntheticHeaders = profile.columns.map(
+      c => c.qualifiedName ?? c.header ?? `Column${c.letter}`
+    );
+    const dataRows = values.slice(profile.dataStartRow);
+    if (dataRows.length === 0) return null;
+    return createTable([syntheticHeaders, ...dataRows], true, 0, 1, qualifiedNames);
+  }
+
+  return createTable(values, true, profile.headerRow, profile.dataStartRow, qualifiedNames);
+}
+
+/**
+ * Resolve column reference (letter, header name, or qualified name) to
+ * the actual column name as it appears in the Arquero table.
+ * Supports 6 strategies: column letters, exact qualified names, exact headers,
+ * fuzzy matching, section-aware matching, and fallback.
  */
 function resolveColumn(ref: string, profile: SheetProfile): string {
-  // If it's a letter like "A", "B", "AA", convert to header name
+  const normalRef = ref.trim().toLowerCase();
+
+  // 1. Column letter (A, B, AA, etc.) → qualified name or header
   if (/^[A-Z]+$/i.test(ref)) {
     const idx = columnToNumber(ref.toUpperCase()) - 1;
     const col = profile.columns[idx];
-    return col?.header ?? ref;
+    return col?.qualifiedName ?? col?.header ?? ref;
   }
+
+  // 2. Exact match on qualifiedName (case-insensitive, trimmed)
+  const byQualified = profile.columns.find(
+    c => c.qualifiedName?.trim().toLowerCase() === normalRef
+  );
+  if (byQualified) return byQualified.qualifiedName ?? byQualified.header ?? ref;
+
+  // 3. Exact match on header name (case-insensitive, trimmed)
+  const byHeader = profile.columns.find(
+    c => c.header?.trim().toLowerCase() === normalRef
+  );
+  if (byHeader) return byHeader.qualifiedName ?? byHeader.header ?? ref;
+
+  // 4. Fuzzy: ref is contained within a qualified name or header
+  const byFuzzy = profile.columns.find(c =>
+    c.qualifiedName?.toLowerCase().includes(normalRef) ||
+    c.header?.toLowerCase().includes(normalRef)
+  );
+  if (byFuzzy) return byFuzzy.qualifiedName ?? byFuzzy.header ?? ref;
+
+  // 5. Section-aware: if ref contains a section name, match columns in that section
+  if (profile.sections) {
+    for (const section of profile.sections) {
+      if (normalRef.includes(section.name.toLowerCase())) {
+        const sectionCols = profile.columns.filter(c => c.section === section.name);
+        const remaining = normalRef.replace(section.name.toLowerCase(), '').trim();
+        if (remaining) {
+          const match = sectionCols.find(c => c.header?.toLowerCase().includes(remaining));
+          if (match) return match.qualifiedName ?? match.header ?? ref;
+        }
+      }
+    }
+  }
+
+  // 6. No match — return as-is and let Arquero handle the error
   return ref;
 }
 
@@ -658,7 +727,7 @@ function applyFilters(
   for (const filter of filters) {
     const col = resolveColumn(filter.column, profile);
     const colProfile = profile.columns.find(
-      (c) => c.header === col || c.letter === filter.column
+      (c) => c.qualifiedName === col || c.header === col || c.letter === filter.column
     );
     const value = coerceValue(filter.value, colProfile?.dataType);
     const value2 = filter.value2 ? coerceValue(filter.value2, colProfile?.dataType) : undefined;

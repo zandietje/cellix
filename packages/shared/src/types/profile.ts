@@ -19,10 +19,40 @@ export interface SheetProfile {
   columns: ColumnProfile[];
   /** Excel tables in this sheet */
   tables: SheetTableInfo[];
+  /** Detected header row (0-based absolute index). -1 if no headers detected. */
+  headerRow: number;
+  /** Row where actual data starts (0-based absolute index) */
+  dataStartRow: number;
+  /** Section groups detected in the sheet (from multi-level headers) */
+  sections?: SheetSection[];
+  /** Debug info about header detection (for troubleshooting) */
+  headerDetection?: HeaderDetectionDebug;
   /** Unix timestamp when profile was extracted */
   extractedAt: number;
   /** Version number for cache invalidation */
   version: number;
+}
+
+/** A section group detected from multi-level headers */
+export interface SheetSection {
+  /** Section name (e.g., "Shopee", "Brand.com") */
+  name: string;
+  /** Starting column index (0-based, inclusive) */
+  startCol: number;
+  /** Ending column index (0-based, inclusive) */
+  endCol: number;
+  /** Column letters range (e.g., "AI-AN") */
+  columnRange: string;
+}
+
+/** Debug output from header detection (helps troubleshooting) */
+export interface HeaderDetectionDebug {
+  /** All candidate rows with their scores */
+  candidates: Array<{ row: number; score: number }>;
+  /** The chosen header row index */
+  chosenRow: number;
+  /** Section row index (-1 if none) */
+  sectionRow: number;
 }
 
 /** Metadata for a single column */
@@ -47,6 +77,10 @@ export interface ColumnProfile {
   nullCount: number;
   /** Data quality indicators */
   quality: QualitySignals;
+  /** Section this column belongs to (from multi-level headers) */
+  section?: string;
+  /** Full qualified name including section prefix (e.g., "Shopee > Sum of Quantity") */
+  qualifiedName?: string;
 }
 
 /** Extended statistics for profile columns */

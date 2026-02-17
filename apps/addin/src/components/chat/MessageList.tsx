@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { memo, useRef, useEffect } from 'react';
 import { makeStyles, Text, tokens } from '@fluentui/react-components';
 import { MessageBubble } from './MessageBubble';
 import type { ChatMessage } from '@cellix/shared';
@@ -28,14 +28,16 @@ interface MessageListProps {
   messages: ChatMessage[];
 }
 
-export function MessageList({ messages }: MessageListProps) {
+const MemoizedMessageBubble = memo(MessageBubble);
+
+export const MessageList = memo(function MessageList({ messages }: MessageListProps) {
   const styles = useStyles();
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when message count changes
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages.length]);
 
   if (messages.length === 0) {
     return (
@@ -53,9 +55,9 @@ export function MessageList({ messages }: MessageListProps) {
   return (
     <div className={styles.container}>
       {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} />
+        <MemoizedMessageBubble key={message.id} message={message} />
       ))}
       <div ref={bottomRef} />
     </div>
   );
-}
+});

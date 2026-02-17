@@ -17,6 +17,7 @@ import type {
   AddTableParams,
   HighlightCellsParams,
 } from '@cellix/shared';
+import { getParams } from './types';
 import {
   isValidAddress,
   isValidSheetName,
@@ -51,17 +52,17 @@ export function validateToolCall(toolCall: ToolCall): ValidationResult {
   // Dispatch to specific validator based on tool name
   switch (toolCall.name) {
     case 'write_range':
-      return validateWriteRange(toolCall.parameters as unknown as WriteRangeParams);
+      return validateWriteRange(getParams<WriteRangeParams>(toolCall));
     case 'set_formula':
-      return validateSetFormula(toolCall.parameters as unknown as SetFormulaParams);
+      return validateSetFormula(getParams<SetFormulaParams>(toolCall));
     case 'format_range':
-      return validateFormatRange(toolCall.parameters as unknown as FormatRangeParams);
+      return validateFormatRange(getParams<FormatRangeParams>(toolCall));
     case 'create_sheet':
-      return validateCreateSheet(toolCall.parameters as unknown as CreateSheetParams);
+      return validateCreateSheet(getParams<CreateSheetParams>(toolCall));
     case 'add_table':
-      return validateAddTable(toolCall.parameters as unknown as AddTableParams);
+      return validateAddTable(getParams<AddTableParams>(toolCall));
     case 'highlight_cells':
-      return validateHighlightCells(toolCall.parameters as unknown as HighlightCellsParams);
+      return validateHighlightCells(getParams<HighlightCellsParams>(toolCall));
     default:
       return { valid: true, errors: [] };
   }
@@ -70,7 +71,7 @@ export function validateToolCall(toolCall: ToolCall): ValidationResult {
 /**
  * Validates write_range parameters.
  */
-export function validateWriteRange(params: WriteRangeParams): ValidationResult {
+function validateWriteRange(params: WriteRangeParams): ValidationResult {
   const errors: ValidationError[] = [];
 
   // Check required fields
@@ -126,7 +127,7 @@ export function validateWriteRange(params: WriteRangeParams): ValidationResult {
 /**
  * Validates set_formula parameters.
  */
-export function validateSetFormula(params: SetFormulaParams): ValidationResult {
+function validateSetFormula(params: SetFormulaParams): ValidationResult {
   const errors: ValidationError[] = [];
 
   // Check required fields
@@ -176,7 +177,7 @@ export function validateSetFormula(params: SetFormulaParams): ValidationResult {
 /**
  * Validates format_range parameters.
  */
-export function validateFormatRange(params: FormatRangeParams): ValidationResult {
+function validateFormatRange(params: FormatRangeParams): ValidationResult {
   const errors: ValidationError[] = [];
 
   if (!params.address) {
@@ -215,7 +216,7 @@ export function validateFormatRange(params: FormatRangeParams): ValidationResult
 /**
  * Validates create_sheet parameters.
  */
-export function validateCreateSheet(params: CreateSheetParams): ValidationResult {
+function validateCreateSheet(params: CreateSheetParams): ValidationResult {
   const errors: ValidationError[] = [];
 
   if (!params.name) {
@@ -249,7 +250,7 @@ export function validateCreateSheet(params: CreateSheetParams): ValidationResult
 /**
  * Validates add_table parameters.
  */
-export function validateAddTable(params: AddTableParams): ValidationResult {
+function validateAddTable(params: AddTableParams): ValidationResult {
   const errors: ValidationError[] = [];
 
   if (!params.address) {
@@ -288,7 +289,7 @@ export function validateAddTable(params: AddTableParams): ValidationResult {
 /**
  * Validates highlight_cells parameters.
  */
-export function validateHighlightCells(params: HighlightCellsParams): ValidationResult {
+function validateHighlightCells(params: HighlightCellsParams): ValidationResult {
   const errors: ValidationError[] = [];
 
   if (!params.address) {

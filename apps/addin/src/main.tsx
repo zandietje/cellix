@@ -5,9 +5,8 @@ import App from './App';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import './index.css';
 
-let isOfficeInitialized = false;
-
-const render = () => {
+// Only render after Office.js is ready — guarantees Office API is available
+Office.onReady(() => {
   const container = document.getElementById('root');
   if (!container) throw new Error('Root element not found');
 
@@ -16,17 +15,9 @@ const render = () => {
     <React.StrictMode>
       <FluentProvider theme={webLightTheme} style={{ height: '100%' }}>
         <ErrorBoundary>
-          <App isOfficeInitialized={isOfficeInitialized} />
+          <App />
         </ErrorBoundary>
       </FluentProvider>
     </React.StrictMode>
   );
-};
-
-// Wait for Office.js to initialize
-Office.onReady((info) => {
-  if (info.host === Office.HostType.Excel) {
-    isOfficeInitialized = true;
-  }
-  render();
 });

@@ -3,8 +3,10 @@
  * All write operations go through the preview system for user confirmation.
  */
 
-import { validateCellCount, isValidSheetName, isFormulaAllowed } from './validation';
+import { validateCellCount, isValidSheetName, isFormulaAllowed, calculateCellCount } from './validation';
+import { columnToNumber } from '@cellix/shared';
 import type { FormatOptions, WriteResult } from '@cellix/shared';
+import { SAFETY_LIMITS } from '../constants';
 
 /**
  * Sanitizes values for Excel write operations.
@@ -52,7 +54,9 @@ export async function writeRange(
 }
 
 /**
- * Sets a formula in a single cell.
+ * Sets a formula in a cell or range.
+ * For ranges, sets the formula in the first cell and uses AutoFill to fill the rest,
+ * so relative references adjust automatically per row (like dragging the fill handle).
  */
 export async function setFormula(
   address: string,
@@ -64,19 +68,67 @@ export async function setFormula(
     return { success: false, cellCount: 1, error: formulaCheck.reason };
   }
 
+  const cellCount = calculateCellCount(address);
+
+  // Validate cell count against safety limit for formula fill
+  const maxCells = cellCount === 1 ? SAFETY_LIMITS.MAX_CELLS_PER_WRITE : SAFETY_LIMITS.MAX_FORMULA_FILL_CELLS;
+  if (cellCount > maxCells) {
+    return {
+      success: false,
+      cellCount,
+      error: `Operation affects ${cellCount} cells. Maximum allowed: ${maxCells}`,
+    };
+  }
+
   try {
     await Excel.run(async (context) => {
       const sheet = context.workbook.worksheets.getActiveWorksheet();
-      const cell = sheet.getRange(address);
-      cell.formulas = [[formula]];
-      await context.sync();
+
+      if (cellCount === 1) {
+        // Single cell: set formula directly
+        const cell = sheet.getRange(address);
+        cell.formulas = [[formula]];
+        await context.sync();
+      } else {
+        // Range: set formula in first cell, convert to R1C1, then broadcast to full range.
+        // R1C1 notation is inherently relative — the same R1C1 string applied to every cell
+        // resolves references relative to that cell's position (like dragging the fill handle).
+        // This replaces the previous autoFill approach which didn't reliably adjust references.
+        const cellRef = address.includes('!') ? address.split('!')[1]! : address;
+        const sheetPrefix = address.includes('!') ? address.substring(0, address.indexOf('!') + 1) : '';
+        const [startRef, endRef] = cellRef.split(':');
+        const firstCellAddress = sheetPrefix + startRef!;
+
+        // Parse range dimensions
+        const startRow = parseInt(startRef!.match(/[0-9]+/)?.[0] || '1', 10);
+        const endRow = parseInt(endRef!.match(/[0-9]+/)?.[0] || '1', 10);
+        const startCol = columnToNumber(startRef!.match(/[A-Za-z]+/)?.[0] || 'A');
+        const endCol = columnToNumber(endRef!.match(/[A-Za-z]+/)?.[0] || 'A');
+        const rowCount = Math.abs(endRow - startRow) + 1;
+        const colCount = Math.abs(endCol - startCol) + 1;
+
+        // Step 1: Set formula in first cell and load R1C1 in one sync
+        const firstCell = sheet.getRange(firstCellAddress);
+        firstCell.formulas = [[formula]];
+        firstCell.load('formulasR1C1');
+        await context.sync();
+
+        // Step 2: Apply R1C1 formula to entire range
+        const r1c1Formula = firstCell.formulasR1C1[0][0] as string;
+        const fullRange = sheet.getRange(address);
+        const formulaArray = Array.from({ length: rowCount }, () =>
+          Array.from({ length: colCount }, () => r1c1Formula)
+        );
+        fullRange.formulasR1C1 = formulaArray;
+        await context.sync();
+      }
     });
 
-    return { success: true, cellCount: 1, address };
+    return { success: true, cellCount, address };
   } catch (error) {
     return {
       success: false,
-      cellCount: 1,
+      cellCount,
       error: error instanceof Error ? error.message : 'Failed to set formula',
     };
   }

@@ -3,7 +3,7 @@
  * Builds preview data by reading current cell values and computing changes.
  */
 
-import { columnToNumber, numberToColumn, isWriteTool } from '@cellix/shared';
+import { columnToNumber, numberToColumn, isWriteTool, normalizeAddress } from '@cellix/shared';
 import type { ToolCall } from '@cellix/shared';
 import type {
   WriteRangeParams,
@@ -12,6 +12,7 @@ import type {
   AddTableParams,
   HighlightCellsParams,
 } from '@cellix/shared';
+import { getParams } from './types';
 import { readRange } from '../excel/reader';
 import { calculateCellCount, requiresConfirmation } from '../excel/validation';
 import { SAFETY_LIMITS } from '../constants';
@@ -38,6 +39,17 @@ export async function generatePreview(toolCall: ToolCall): Promise<PreviewData> 
       validation,
       generatedAt: Date.now(),
     };
+  }
+
+  // Normalize backwards ranges (e.g., Z1140:Z1000 → Z1000:Z1140) for all write tools
+  if (isWriteTool(toolCall.name)) {
+    const params = toolCall.parameters as Record<string, unknown>;
+    if (typeof params.address === 'string') {
+      const normalized = normalizeAddress(params.address);
+      if (normalized !== params.address) {
+        toolCall = { ...toolCall, parameters: { ...params, address: normalized } };
+      }
+    }
   }
 
   // Dispatch to specific preview generator based on tool name
@@ -76,7 +88,7 @@ async function generateWriteRangePreview(
   validation: ReturnType<typeof validateToolCall>,
   warnings: string[]
 ): Promise<PreviewData> {
-  const params = toolCall.parameters as unknown as WriteRangeParams;
+  const params = getParams<WriteRangeParams>(toolCall);
   const cellCount = params.values ? params.values.length * (params.values[0]?.length || 0) : 0;
 
   let changes: CellChange[] = [];
@@ -115,51 +127,114 @@ async function generateWriteRangePreview(
 
 /**
  * Generates preview for set_formula tool.
+ * Supports both single-cell and range addresses.
  */
 async function generateSetFormulaPreview(
   toolCall: ToolCall,
   validation: ReturnType<typeof validateToolCall>,
   warnings: string[]
 ): Promise<PreviewData> {
-  const params = toolCall.parameters as unknown as SetFormulaParams;
+  const params = getParams<SetFormulaParams>(toolCall);
+  const cellCount = params.address ? calculateCellCount(params.address) : 1;
   let changes: CellChange[] = [];
   let beforeValues: unknown[][] = [];
+
+  // Validate cell count against formula fill limit
+  if (cellCount > 1 && cellCount > SAFETY_LIMITS.MAX_FORMULA_FILL_CELLS) {
+    validation = {
+      valid: false,
+      errors: [
+        ...validation.errors,
+        {
+          field: 'address',
+          message: `Formula fill affects ${cellCount} cells. Maximum allowed: ${SAFETY_LIMITS.MAX_FORMULA_FILL_CELLS}`,
+          code: 'SIZE_LIMIT_EXCEEDED',
+        },
+      ],
+    };
+    warnings.push(`Range too large: ${cellCount} cells exceeds the ${SAFETY_LIMITS.MAX_FORMULA_FILL_CELLS} cell limit`);
+  }
 
   if (validation.valid && params.address) {
     try {
       beforeValues = await readRange(params.address);
-      const currentValue = beforeValues[0]?.[0];
-      changes = [
-        {
-          address: params.address,
-          currentValue,
-          newValue: params.formula,
-          isOverwrite: currentValue !== null && currentValue !== undefined && currentValue !== '',
-        },
-      ];
 
-      if (changes[0].isOverwrite) {
-        warnings.push('Cell has existing content that will be replaced');
+      if (cellCount === 1) {
+        // Single cell
+        const currentValue = beforeValues[0]?.[0];
+        changes = [
+          {
+            address: params.address,
+            currentValue,
+            newValue: params.formula,
+            isOverwrite: currentValue !== null && currentValue !== undefined && currentValue !== '',
+          },
+        ];
+
+        if (changes[0].isOverwrite) {
+          warnings.push('Cell has existing content that will be replaced');
+        }
+      } else {
+        // Range: show first cell + summary for rest
+        const cellRef = params.address.includes('!') ? params.address.split('!')[1]! : params.address;
+        const firstCellRef = cellRef.split(':')[0]!;
+        const sheetPrefix = params.address.includes('!') ? params.address.substring(0, params.address.indexOf('!') + 1) : '';
+        const firstCellAddress = sheetPrefix + firstCellRef;
+
+        const firstCurrentValue = beforeValues[0]?.[0];
+        changes = [
+          {
+            address: firstCellAddress,
+            currentValue: firstCurrentValue,
+            newValue: params.formula,
+            isOverwrite: firstCurrentValue !== null && firstCurrentValue !== undefined && firstCurrentValue !== '',
+          },
+        ];
+
+        // Count overwrites across the range
+        let overwriteCount = 0;
+        for (const row of beforeValues) {
+          for (const cell of row) {
+            if (cell !== null && cell !== undefined && cell !== '') {
+              overwriteCount++;
+            }
+          }
+        }
+
+        if (overwriteCount > 0) {
+          warnings.push(`${overwriteCount} cell(s) with existing data will be overwritten`);
+        }
+
+        warnings.push(`Formula will auto-fill across ${cellCount} cells with relative references adjusting per row`);
       }
     } catch {
+      // Range might not exist yet
+      const cellRef = params.address.includes('!') ? params.address.split('!')[1]! : params.address;
+      const firstCellRef = cellRef.split(':')[0]!;
+      const firstCellAddress = (params.address.includes('!') ? params.address.substring(0, params.address.indexOf('!') + 1) : '') + firstCellRef;
+
       changes = [
         {
-          address: params.address,
+          address: cellCount === 1 ? params.address : firstCellAddress,
           currentValue: null,
           newValue: params.formula,
           isOverwrite: false,
         },
       ];
+
+      if (cellCount > 1) {
+        warnings.push(`Formula will auto-fill across ${cellCount} cells with relative references adjusting per row`);
+      }
     }
   }
 
   return {
     toolCall,
     affectedRange: params.address || '',
-    cellCount: 1,
+    cellCount,
     changes,
     warnings,
-    requiresConfirmation: false, // Single cell formula doesn't need confirmation
+    requiresConfirmation: requiresConfirmation(cellCount),
     validation,
     generatedAt: Date.now(),
     beforeValues: beforeValues.length > 0 ? beforeValues : undefined,
@@ -175,7 +250,7 @@ async function generateFormatRangePreview(
   validation: ReturnType<typeof validateToolCall>,
   warnings: string[]
 ): Promise<PreviewData> {
-  const params = toolCall.parameters as unknown as FormatRangeParams;
+  const params = getParams<FormatRangeParams>(toolCall);
   const cellCount = params.address ? calculateCellCount(params.address) : 0;
 
   // Format changes don't modify values, but we can show what formatting will be applied
@@ -228,7 +303,7 @@ async function generateAddTablePreview(
   validation: ReturnType<typeof validateToolCall>,
   warnings: string[]
 ): Promise<PreviewData> {
-  const params = toolCall.parameters as unknown as AddTableParams;
+  const params = getParams<AddTableParams>(toolCall);
   const cellCount = params.address ? calculateCellCount(params.address) : 0;
 
   warnings.push(`Will create table "${params.name}" from range ${params.address}`);
@@ -254,7 +329,7 @@ async function generateHighlightCellsPreview(
   validation: ReturnType<typeof validateToolCall>,
   warnings: string[]
 ): Promise<PreviewData> {
-  const params = toolCall.parameters as unknown as HighlightCellsParams;
+  const params = getParams<HighlightCellsParams>(toolCall);
   const cellCount = params.address ? calculateCellCount(params.address) : 0;
 
   warnings.push(`Will highlight with color: ${params.color}`);

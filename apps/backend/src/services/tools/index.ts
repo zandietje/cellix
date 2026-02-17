@@ -3,4 +3,4 @@
  */
 
 export * from './schemas.js';
-export { TOOL_DEFINITIONS, TOOL_WHITELIST, isToolAllowed } from './definitions.js';
+export { TOOL_DEFINITIONS, READ_TOOL_DEFINITIONS } from './definitions.js';

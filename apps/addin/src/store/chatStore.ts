@@ -32,6 +32,8 @@ interface ChatState {
   updateToolCallStatus: (toolCallId: string, status: ToolCallStatus) => void;
   /** Update a tool call's status and store its result */
   setToolCallResult: (toolCallId: string, status: ToolCallStatus, result?: unknown, error?: string) => void;
+  /** Set tier/model metadata on the last assistant message */
+  setLastAssistantMeta: (tier: string, model: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -132,6 +134,16 @@ export const useChatStore = create<ChatState>((set) => ({
         return { ...message, toolCalls: updatedToolCalls };
       });
 
+      return { messages };
+    }),
+
+  setLastAssistantMeta: (tier, model) =>
+    set((state) => {
+      const messages = [...state.messages];
+      const lastIndex = messages.length - 1;
+      if (lastIndex >= 0 && messages[lastIndex].role === 'assistant') {
+        messages[lastIndex] = { ...messages[lastIndex], tier, model };
+      }
       return { messages };
     }),
 }));

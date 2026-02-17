@@ -1,58 +1,55 @@
 /**
- * Control panel for Excel context management.
- * Allows users to refresh and view the current Excel selection context.
+ * Control panel with model selector and new chat button.
+ * Excel context is loaded automatically in the background.
  */
 
 import { makeStyles, tokens, Button, Text, Spinner, ProgressBar } from '@fluentui/react-components';
-import { ArrowSync24Regular, ChatAdd24Regular } from '@fluentui/react-icons';
+import { ChatAdd24Regular } from '@fluentui/react-icons';
 import { useExcelContext } from '../../hooks/useExcelContext';
 import { useExcelStore } from '../../store/excelStore';
 import { useChatStore } from '../../store/chatStore';
-import { ContextDisplay } from './ContextDisplay';
 
 const useStyles = makeStyles({
   container: {
-    padding: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
     backgroundColor: tokens.colorNeutralBackground2,
     borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
   },
-  header: {
+  row: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: tokens.spacingVerticalS,
-  },
-  title: {
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  actions: {
-    display: 'flex',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
-  },
-  error: {
-    color: tokens.colorPaletteRedForeground1,
-    marginTop: tokens.spacingVerticalS,
-  },
-  placeholder: {
-    color: tokens.colorNeutralForeground3,
   },
   progressContainer: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    marginTop: tokens.spacingVerticalS,
-    marginBottom: tokens.spacingVerticalS,
+    marginTop: tokens.spacingVerticalXS,
   },
   progressLabel: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  error: {
+    color: tokens.colorPaletteRedForeground1,
+    marginTop: tokens.spacingVerticalXS,
+  },
+  contextInfo: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalXS,
+  },
 });
 
 export function ControlPanel() {
   const styles = useStyles();
-  const { context, isLoading, error, refresh } = useExcelContext();
+  // Auto-refresh context on selection change (no manual refresh needed)
+  const { isLoading, error } = useExcelContext({ autoRefresh: true });
   const { isProfileLoading, profilingProgress } = useExcelStore();
   const { startNewSession, isTyping } = useChatStore();
 
@@ -60,26 +57,16 @@ export function ControlPanel() {
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <Text className={styles.title}>Excel Context</Text>
-        <div className={styles.actions}>
-          <Button
-            appearance="subtle"
-            icon={<ChatAdd24Regular />}
-            onClick={startNewSession}
-            disabled={isTyping}
-          >
-            New Chat
-          </Button>
-          <Button
-            appearance="subtle"
-            icon={isLoading ? <Spinner size="tiny" /> : <ArrowSync24Regular />}
-            onClick={refresh}
-            disabled={isLoading || isProfileLoading}
-          >
-            {isLoading ? 'Loading...' : 'Refresh'}
-          </Button>
-        </div>
+      <div className={styles.row}>
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={<ChatAdd24Regular />}
+          onClick={startNewSession}
+          disabled={isTyping}
+        >
+          New Chat
+        </Button>
       </div>
 
       {showProgress && (
@@ -92,19 +79,18 @@ export function ControlPanel() {
         </div>
       )}
 
+      {isLoading && !showProgress && (
+        <div className={styles.contextInfo}>
+          <Spinner size="extra-tiny" />
+          <Text size={100}>Updating context...</Text>
+        </div>
+      )}
+
       {error && (
         <Text className={styles.error} size={200}>
           {error}
         </Text>
       )}
-
-      {context ? (
-        <ContextDisplay context={context} />
-      ) : !isLoading && !error && !showProgress ? (
-        <Text size={200} className={styles.placeholder}>
-          Click "Refresh" to load the current Excel selection.
-        </Text>
-      ) : null}
     </div>
   );
 }

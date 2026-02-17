@@ -93,16 +93,3 @@ export function unregisterAllListeners(): void {
   debounceTimers.clear();
 }
 
-/**
- * Check if a sheet has a registered listener.
- */
-export function hasRegisteredListener(sheetName: string): boolean {
-  return registeredSheets.has(sheetName);
-}
-
-/**
- * Get count of registered listeners.
- */
-export function getRegisteredListenerCount(): number {
-  return registeredSheets.size;
-}

@@ -5,6 +5,16 @@
 
 import type { ToolCall } from '@cellix/shared';
 
+/**
+ * Extract typed parameters from a ToolCall.
+ * Parameters are validated by backend Zod schemas and by validateToolCall()
+ * before reaching execution, so the runtime shape is guaranteed.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters
+export function getParams<T>(toolCall: ToolCall): T {
+  return toolCall.parameters as unknown as T;
+}
+
 // Re-export tool types from shared package (single source of truth)
 export type {
   WriteRangeParams,

@@ -16,6 +16,8 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required'),
   OPENAI_BASE_URL: z.string().optional(), // e.g., https://openrouter.ai/api/v1
   OPENAI_MODEL: z.string().default('gpt-4o'),
+  // Auth (optional in development, required in production)
+  API_SECRET_KEY: z.string().optional(),
   // Database (optional - graceful degradation without it)
   SUPABASE_URL: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),

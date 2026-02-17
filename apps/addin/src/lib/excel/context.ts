@@ -217,14 +217,18 @@ function calculateStats(values: unknown[][], headers: string[]): BasicStats {
       .filter((n): n is number => n !== null);
 
     if (numbers.length > 0) {
+      const sum = numbers.reduce((a, b) => a + b, 0);
+      const avg = sum / numbers.length;
+      const variance = numbers.reduce((acc, n) => acc + (n - avg) ** 2, 0) / numbers.length;
       numericColumns.push({
         column: col,
         header: headers[col] || `Column ${col + 1}`,
-        sum: numbers.reduce((a, b) => a + b, 0),
-        avg: numbers.reduce((a, b) => a + b, 0) / numbers.length,
+        sum,
+        avg,
         min: Math.min(...numbers),
         max: Math.max(...numbers),
         count: numbers.length,
+        stdev: Math.sqrt(variance),
       });
     }
   }

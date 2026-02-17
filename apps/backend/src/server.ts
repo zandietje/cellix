@@ -1,6 +1,7 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import { env } from './lib/env.js';
+import { authMiddleware } from './middleware/auth.js';
 
 export async function buildServer(): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -24,8 +25,11 @@ export async function buildServer(): Promise<FastifyInstance> {
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Api-Key'],
   });
+
+  // Auth middleware
+  fastify.addHook('onRequest', authMiddleware);
 
   // Request logging
   fastify.addHook('onRequest', async (request) => {

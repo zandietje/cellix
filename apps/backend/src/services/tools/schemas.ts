@@ -18,7 +18,7 @@ export const writeRangeSchema = z.object({
 
 /** Set an Excel formula in a cell */
 export const setFormulaSchema = z.object({
-  address: z.string().describe('Target cell address (e.g., "D1", "Sheet1!E5")'),
+  address: z.string().describe('Target cell or range address (e.g., "D1", "Z2:Z5000", "Sheet1!E5:E100"). Use a range to fill the formula across multiple rows.'),
   formula: z.string().describe('Excel formula starting with = (e.g., "=SUM(A1:A10)", "=B2*C2")'),
   reason: z.string().describe('Brief explanation of the formula purpose'),
 });

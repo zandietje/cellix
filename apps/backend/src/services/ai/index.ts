@@ -7,8 +7,9 @@ import type { AIProvider } from './types.js';
 
 export * from './types.js';
 export { SYSTEM_PROMPT } from './prompt.js';
-export { formatExcelContext, formatProfileContext } from './context.js';
+export { formatExcelContext, formatProfileContext, buildContextText, ensurePromptFitsTokenBudget } from './context.js';
 export { planToolCall, isValidToolPlan } from './planner.js';
+export { classifyTier, classifyContinuationTier, MODEL_TIERS } from './router.js';
 
 let providerInstance: AIProvider | null = null;
 

@@ -35,7 +35,6 @@ export const READ_TOOLS = [
 /** Names of analytics/reasoning tools */
 export const ANALYTICS_TOOLS = [
   'explain_kpi',
-  'compare_periods',
   'suggest_actions',
 ] as const;
 
@@ -78,7 +77,7 @@ export interface WriteRangeParams {
 
 /** Parameters for set_formula tool */
 export interface SetFormulaParams {
-  /** Target cell address */
+  /** Target cell or range address (e.g., "D1", "Z2:Z5000") */
   address: string;
   /** Formula to set (must start with =) */
   formula: string;
